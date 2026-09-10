@@ -1,0 +1,45 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+}
+
+:root {
+  --background: #f7f3ec;
+  --foreground: #1c1917;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.leaflet-container {
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  z-index: 0;
+}
+
+.discovery-popup .popup-title {
+  margin: 0;
+  font-weight: 600;
+  color: #1c1917;
+}
+
+.discovery-popup .popup-meta,
+.discovery-popup .popup-counts {
+  margin: 0.25rem 0 0;
+  color: #57534e;
+  font-size: 0.85rem;
+}
+
+.discovery-popup .popup-links {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.75rem 0 0;
+}
+
+.discovery-popup .popup-links a {
+  color: #9f1239;
+  text-decoration: underline;
+}
