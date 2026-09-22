@@ -2,33 +2,158 @@
 
 @theme inline {
   --font-sans: var(--font-body), ui-sans-serif, system-ui, sans-serif;
+  --color-canvas: #f3efe8;
+  --color-surface: #fffcf7;
+  --color-ink: #171716;
+  --color-muted: #5c5a56;
+  --color-faint: #8a8782;
+  --color-line: #e0d9cf;
+  --color-brand: #7a2438;
+  --color-brand-hover: #611c2c;
+  --color-brand-soft: #f4e8eb;
+  --color-geo: #2f5d62;
+  --color-geo-soft: #e4eeef;
+  --color-earth: #b56a4c;
+  --color-earth-soft: #f4ebe4;
+  --color-live: #c8102e;
+  --color-danger: #9b1c1c;
+  --color-danger-soft: #f8e8e8;
+  --color-warn-soft: #f6eedf;
+  --color-ok-soft: #e8f0ea;
+  --color-focus: #7a2438;
 }
 
 :root {
-  --background: #f7f3ec;
-  --foreground: #1c1917;
+  --background: var(--color-canvas);
+  --foreground: var(--color-ink);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+@layer components {
+  .fh-page {
+    @apply mx-auto w-full max-w-5xl px-4 py-8 sm:py-10;
+  }
+
+  .fh-page-narrow {
+    @apply mx-auto w-full max-w-2xl px-4 py-8 sm:py-10;
+  }
+
+  .fh-page-article {
+    @apply mx-auto w-full max-w-3xl px-4 py-8 sm:py-10;
+  }
+
+  .fh-hero {
+    @apply text-[1.75rem] font-semibold leading-[1.15] tracking-tight text-ink sm:text-4xl;
+  }
+
+  .fh-place {
+    @apply text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-geo;
+  }
+
+  .fh-geo-wash {
+    background-image:
+      linear-gradient(180deg, rgb(47 93 98 / 0.08), transparent 58%),
+      radial-gradient(circle at 1px 1px, rgb(47 93 98 / 0.16) 1px, transparent 0);
+    background-size: auto, 22px 22px;
+  }
+
+  .fh-geo-rule {
+    @apply border-t border-geo/20;
+  }
+
+  .fh-title {
+    @apply text-[1.75rem] font-semibold leading-tight tracking-tight text-ink sm:text-4xl;
+  }
+
+  .fh-section {
+    @apply text-lg font-semibold tracking-tight text-ink;
+  }
+
+  .fh-report-title {
+    @apply text-base font-semibold leading-snug tracking-tight text-ink;
+  }
+
+  .fh-body {
+    @apply text-base leading-7 text-ink;
+  }
+
+  .fh-lede {
+    @apply text-base leading-7 text-muted sm:text-lg;
+  }
+
+  .fh-meta {
+    @apply text-sm text-muted;
+  }
+
+  .fh-label {
+    @apply text-xs font-medium text-faint;
+  }
+
+  .fh-kicker {
+    @apply text-xs font-medium text-brand;
+  }
+
+  .fh-grid {
+    @apply mt-5 grid gap-4 sm:grid-cols-2;
+  }
+
+  .fh-section-block {
+    @apply mt-8 sm:mt-12;
+  }
+
+  .fh-content-card {
+    @apply overflow-hidden rounded-lg border border-line bg-surface;
+  }
+
+  .fh-menu {
+    @apply z-50 rounded-lg border border-line bg-surface p-1.5 shadow-sm;
+  }
+
+  .fh-input {
+    @apply mt-1 h-10 w-full rounded-md border border-line bg-surface px-3 text-sm text-ink outline-none focus:border-ink;
+  }
+
+  .fh-textarea {
+    @apply mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm leading-6 text-ink outline-none focus:border-ink;
+  }
+
+  .fh-select {
+    @apply mt-1 h-10 w-full rounded-md border border-line bg-surface px-3 text-sm text-ink outline-none focus:border-ink;
+  }
+
+  .fh-list-row {
+    @apply block border-b border-line py-4 text-ink last:border-b-0 hover:bg-surface/80;
+  }
+
+  .fh-alert {
+    @apply mt-3 rounded-md px-3 py-2 text-sm;
+  }
+
+  .fh-focus {
+    @apply focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand;
+  }
 }
 
 .leaflet-container {
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
   z-index: 0;
+  background: var(--color-canvas);
 }
 
 .discovery-popup .popup-title {
   margin: 0;
   font-weight: 600;
-  color: #1c1917;
+  color: var(--color-ink);
 }
 
 .discovery-popup .popup-meta,
 .discovery-popup .popup-counts {
   margin: 0.25rem 0 0;
-  color: #57534e;
+  color: var(--color-muted);
   font-size: 0.85rem;
 }
 
@@ -40,6 +165,7 @@ body {
 }
 
 .discovery-popup .popup-links a {
-  color: #9f1239;
+  color: var(--color-brand);
   text-decoration: underline;
+  text-underline-offset: 2px;
 }

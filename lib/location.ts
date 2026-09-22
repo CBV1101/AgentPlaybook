@@ -42,6 +42,10 @@ export function formatLocationLabel(location: {
   return [location.place, location.city, location.country].filter(Boolean).join(", ");
 }
 
+export function formatCityCountry(location: { city: string; country: string }) {
+  return `${location.city}, ${location.country}`;
+}
+
 export function parseCoordinate(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;

@@ -1,10 +1,20 @@
 import { createHash } from "node:crypto";
+import { applyEventSeed } from "@/lib/data/mock/event-seed";
 import { applyGeographySeed } from "@/lib/data/mock/geography-seed";
+import { applyLiveSeed } from "@/lib/data/mock/live-seed";
+import { applyNotificationSeed } from "@/lib/data/mock/notification-seed";
+import { applySafetySeed } from "@/lib/data/mock/safety-seed";
+import { applyWorldSeed } from "@/lib/data/mock/world-seed";
+import { uploadProvenanceFields } from "@/lib/media/provenance";
 import type {
   CoverageRequestRecord,
+  EventRecord,
   LicensingTransaction,
+  LiveStreamRecord,
   Location,
   LocationFollow,
+  NotificationPreferenceRow,
+  NotificationRecordRow,
   Profile,
   ProfileFollow,
   ReportCorrection,
@@ -15,9 +25,32 @@ import type {
   ModerationReportRecord,
 } from "@/lib/database.types";
 
-export const MOCK_SCHEMA_VERSION = 8;
+export const MOCK_SCHEMA_VERSION = 20;
 export const DEMO_EMAIL = "jordan@firsthand.local";
 export const DEMO_PASSWORD = "firsthand";
+
+export function backfillMockMediaProvenance(database: MockDatabase) {
+  const liveMediaIds = new Set(
+    (database.live_streams ?? [])
+      .map((item) => item.recording_asset_id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  let changed = false;
+  for (const item of database.report_media) {
+    if (!item.provenance_type) {
+      item.provenance_type =
+        liveMediaIds.has(item.id) || item.original_filename === "live-recording.mp4"
+          ? "unknown"
+          : "creator_declared";
+      changed = true;
+    }
+    if (item.original_sha256 === undefined) {
+      item.original_sha256 = null;
+      changed = true;
+    }
+  }
+  return changed;
+}
 
 export function hashPassword(password: string) {
   return createHash("sha256").update(`firsthand:${password}`).digest("hex");
@@ -34,6 +67,7 @@ export type MockDatabase = {
   accounts: MockAccount[];
   profiles: Profile[];
   locations: Location[];
+  events: EventRecord[];
   coverage_requests: CoverageRequestRecord[];
   request_interests: RequestInterest[];
   reports: ReportRecord[];
@@ -44,6 +78,9 @@ export type MockDatabase = {
   report_corrections: ReportCorrection[];
   licensing_transactions: LicensingTransaction[];
   moderation_reports: ModerationReportRecord[];
+  live_streams: LiveStreamRecord[];
+  notifications: NotificationRecordRow[];
+  notification_preferences: NotificationPreferenceRow[];
 };
 
 const ids = {
@@ -80,6 +117,10 @@ const ids = {
   interestAlex: "eeeeeee1-eeee-4eee-8eee-eeeeeeeeeee2",
   followPriyaJordan: "fffffff1-ffff-4fff-8fff-fffffffffff1",
   followAlexPriya: "fffffff1-ffff-4fff-8fff-fffffffffff2",
+  supportJordanPark: "88888881-8888-4888-8888-888888888881",
+  supportAlexPark: "88888881-8888-4888-8888-888888888882",
+  supportJordanPhoenix: "88888881-8888-4888-8888-888888888883",
+  licenseJordanPhoenix: "99999991-9999-4999-8999-999999999991",
 };
 
 export function createSeedDatabase(): MockDatabase {
@@ -102,6 +143,7 @@ export function createSeedDatabase(): MockDatabase {
         home_city: "Berlin",
         home_country: "Germany",
         created_at: "2026-03-12T10:00:00.000Z",
+        topics: ["local_news", "community"],
       },
       {
         id: ids.priya,
@@ -112,6 +154,7 @@ export function createSeedDatabase(): MockDatabase {
         home_city: "Seattle",
         home_country: "United States",
         created_at: "2026-04-02T16:20:00.000Z",
+        topics: ["public_safety", "community"],
       },
       {
         id: ids.alex,
@@ -122,6 +165,7 @@ export function createSeedDatabase(): MockDatabase {
         home_city: "Madison",
         home_country: "United States",
         created_at: "2026-05-18T09:00:00.000Z",
+        topics: ["politics", "local_news"],
       },
     ],
     locations: [
@@ -206,6 +250,7 @@ export function createSeedDatabase(): MockDatabase {
         created_at: now,
       },
     ],
+    events: [],
     coverage_requests: [
       {
         id: ids.reqPark,
@@ -366,13 +411,51 @@ export function createSeedDatabase(): MockDatabase {
       },
     ],
     location_follows: [],
-    report_supports: [],
+    report_supports: [
+      {
+        id: ids.supportJordanPark,
+        report_id: ids.repPark,
+        user_id: ids.jordan,
+        created_at: "2026-09-10T16:40:00.000Z",
+      },
+      {
+        id: ids.supportAlexPark,
+        report_id: ids.repPark,
+        user_id: ids.alex,
+        created_at: "2026-09-10T17:05:00.000Z",
+      },
+      {
+        id: ids.supportJordanPhoenix,
+        report_id: ids.repPhoenix,
+        user_id: ids.jordan,
+        created_at: "2026-09-10T10:00:00.000Z",
+      },
+    ],
     report_corrections: [],
-    licensing_transactions: [],
+    licensing_transactions: [
+      {
+        id: ids.licenseJordanPhoenix,
+        report_id: ids.repPhoenix,
+        report_media_id: ids.mediaPhoenix,
+        licensee_profile_id: ids.jordan,
+        reporter_id: ids.alex,
+        organization_name: "Northside Desk",
+        contact_email: DEMO_EMAIL,
+        intended_use: "news_broadcast",
+        message: "We would like to license the cooling-center video for an evening news segment.",
+        status: "inquiry",
+        created_at: "2026-09-10T11:20:00.000Z",
+      },
+    ],
     moderation_reports: [],
+    live_streams: [],
+    notifications: [],
+    notification_preferences: [],
   } as unknown as MockDatabase;
 
-  return applyGeographySeed(database);
+  return applyNotificationSeed(
+    applySafetySeed(applyLiveSeed(applyEventSeed(applyWorldSeed(applyGeographySeed(database))))),
+  );
 }
 
 function media(
@@ -398,5 +481,9 @@ function media(
     uploaded_at: uploadedAt,
     licensing_status: licensing,
     created_at: uploadedAt,
+    provider: "local",
+    provider_asset_id: id,
+    upload_status: "ready",
+    ...uploadProvenanceFields(),
   };
 }
