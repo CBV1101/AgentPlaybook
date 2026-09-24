@@ -3,9 +3,10 @@
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
-import { createCoverageRequestRecord, createReportRecord, expressInterestRecord } from "@/lib/data";
+import { createCoverageRequestRecord, createReportRecord, expressInterestRecord, getProfileByUserId, publishReportRecord } from "@/lib/data";
 import { parseCoordinate, type StructuredLocation } from "@/lib/location";
-import { loginPath, safeNextPath } from "@/lib/paths";
+import { loginPath, reporterProfileSetupPath, safeNextPath } from "@/lib/paths";
+import { isReporterProfileComplete } from "@/lib/profile";
 
 function formString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -63,6 +64,7 @@ export async function createCoverageRequest(formData: FormData) {
       title,
       description: description || null,
       location,
+      eventId: formString(formData, "event_id") || null,
     });
     redirect(`/requests/${id}`);
   } catch (error) {
@@ -96,13 +98,18 @@ export async function expressInterest(formData: FormData) {
   redirect(next);
 }
 
-export async function createReport(formData: FormData) {
+export async function createReportDraft(formData: FormData) {
   const requestId = formString(formData, "request_id") || null;
   const fallbackNext = requestId ? `/reports/new?requestId=${requestId}` : "/reports/new";
   const user = await getCurrentUser();
 
   if (!user) {
     redirect(loginPath(fallbackNext));
+  }
+
+  const profile = await getProfileByUserId(user.id);
+  if (!isReporterProfileComplete(profile)) {
+    redirect(reporterProfileSetupPath(fallbackNext));
   }
 
   const title = formString(formData, "title");
@@ -112,24 +119,21 @@ export async function createReport(formData: FormData) {
   const location = locationFromForm(formData);
   const confirmation = formString(formData, "firsthand_attestation");
   const licensingStatus = formString(formData, "licensing_status");
-  const files = formData
-    .getAll("media")
-    .filter((value): value is File => value instanceof File && value.size > 0);
 
   if (confirmation !== "on") {
-    redirect(withError(fallbackNext, "attestation"));
+    return { ok: false as const, error: "attestation" };
   }
   if (formString(formData, "allegation_acknowledged") !== "on") {
-    redirect(withError(fallbackNext, "allegation"));
+    return { ok: false as const, error: "allegation" };
   }
   if (licensingStatus !== "view_only" && licensingStatus !== "licensing_available") {
-    redirect(withError(fallbackNext, "licensing"));
+    return { ok: false as const, error: "licensing" };
   }
   if (!title || !description) {
-    redirect(withError(fallbackNext, "missing"));
+    return { ok: false as const, error: "missing" };
   }
-  if (files.length === 0) {
-    redirect(withError(fallbackNext, "media"));
+  if (!locationId && !location) {
+    return { ok: false as const, error: "location" };
   }
 
   try {
@@ -141,16 +145,33 @@ export async function createReport(formData: FormData) {
       requestId,
       locationId: locationId || undefined,
       location,
-      files,
       licensingStatus,
+      eventId: formString(formData, "event_id") || null,
     });
-
-    redirect(`/reports/${created.id}`);
+    return { ok: true as const, reportId: created.id };
   } catch (error) {
-    if (isRedirectError(error)) {
-      throw error;
-    }
+    const message = error instanceof Error ? error.message : "Could not create the report.";
+    return { ok: false as const, error: message === "location" ? "location" : message };
+  }
+}
+
+export async function publishReport(reportId: string) {
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect(loginPath("/reports/new"));
+  }
+  const profile = await getProfileByUserId(user.id);
+  if (!isReporterProfileComplete(profile)) {
+    redirect(reporterProfileSetupPath("/reports/new"));
+  }
+  if (!reportId) {
+    return { ok: false as const, error: "That report was not found." };
+  }
+  try {
+    await publishReportRecord(user.id, reportId);
+    return { ok: true as const, reportId };
+  } catch (error) {
     const message = error instanceof Error ? error.message : "Could not publish the report.";
-    redirect(withError(fallbackNext, message === "location" ? "location" : message));
+    return { ok: false as const, error: message };
   }
 }

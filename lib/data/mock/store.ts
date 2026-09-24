@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createSeedDatabase, MOCK_SCHEMA_VERSION, type MockDatabase } from "@/lib/data/mock/seed";
+import { backfillMockMediaProvenance, createSeedDatabase, MOCK_SCHEMA_VERSION, type MockDatabase } from "@/lib/data/mock/seed";
 
 const dbPath = join(process.cwd(), ".local", "mock-db.json");
 
@@ -15,6 +15,9 @@ export function readMockDatabase(): MockDatabase {
       const seeded = createSeedDatabase();
       writeMockDatabase(seeded);
       return seeded;
+    }
+    if (backfillMockMediaProvenance(parsed)) {
+      writeMockDatabase(parsed);
     }
     return parsed;
   } catch {

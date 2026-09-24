@@ -49,7 +49,7 @@ Avoid newspaper eyebrows (`uppercase tracking-[0.2em]`).
 
 | Rule | Class / value |
 | --- | --- |
-| Page max width | `.fh-page` (`max-w-5xl`) |
+| Page max width | `.fh-page` (`max-w-5xl`); homepage / following: `.fh-page-home` (`max-w-[1520px]`) |
 | Narrow forms | `.fh-page-narrow` (`max-w-2xl`) |
 | Article / report | `.fh-page-article` (`max-w-3xl`) |
 | Mobile gutter | `px-4` |

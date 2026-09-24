@@ -2,11 +2,12 @@ type ReporterAvatarProps = {
   name: string;
   username: string;
   avatarUrl?: string | null;
-  size?: "md" | "lg";
+  size?: "sm" | "md" | "lg";
 };
 
 export function ReporterAvatar({ name, username, avatarUrl, size = "lg" }: ReporterAvatarProps) {
-  const dimension = size === "lg" ? "h-24 w-24 text-2xl" : "h-12 w-12 text-sm";
+  const dimension =
+    size === "lg" ? "h-24 w-24 text-2xl" : size === "md" ? "h-12 w-12 text-sm" : "h-8 w-8 text-[11px]";
   const initials = name
     .split(" ")
     .filter(Boolean)
@@ -20,7 +21,7 @@ export function ReporterAvatar({ name, username, avatarUrl, size = "lg" }: Repor
       <img
         src={avatarUrl}
         alt=""
-        className={`${dimension} rounded-full border border-stone-200 object-cover`}
+        className={`${dimension} rounded-full border border-line object-cover`}
       />
     );
   }
@@ -28,7 +29,7 @@ export function ReporterAvatar({ name, username, avatarUrl, size = "lg" }: Repor
   return (
     <div
       aria-hidden="true"
-      className={`${dimension} flex items-center justify-center rounded-full bg-stone-800 font-medium text-stone-50`}
+      className={`${dimension} flex items-center justify-center rounded-full bg-ink font-medium text-surface`}
       title={`@${username}`}
     >
       {initials || username.slice(0, 2).toUpperCase()}

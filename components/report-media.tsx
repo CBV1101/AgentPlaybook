@@ -6,49 +6,51 @@ type ReportMediaItem = {
   thumbnail_url?: string | null;
 };
 
+const stageClass = "w-full bg-ink";
+const mediaClass = "mx-auto block max-h-[80vh] w-full object-contain";
+
 export function ReportMediaGallery({ media }: { media: ReportMediaItem[] }) {
   if (media.length === 0) {
     return null;
   }
 
   return (
-    <section className="mt-8 space-y-4">
+    <div className="space-y-3">
       {media.map((item) => {
         if (item.media_type === "video") {
           if (isCloudflareStreamEmbed(item.media_url)) {
             return (
-              <iframe
-                key={item.media_url}
-                src={item.media_url}
-                title="Firsthand video"
-                allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
-                allowFullScreen
-                className="aspect-video w-full rounded-2xl border border-stone-200 bg-black"
-              />
+              <div key={item.media_url} className={`${stageClass} aspect-video`}>
+                <iframe
+                  src={item.media_url}
+                  title="Firsthand video"
+                  allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                  className="h-full w-full"
+                />
+              </div>
             );
           }
           return (
-            <video
-              key={item.media_url}
-              src={item.media_url}
-              poster={item.thumbnail_url ?? undefined}
-              controls
-              playsInline
-              className="w-full rounded-2xl border border-stone-200 bg-black"
-            />
+            <div key={item.media_url} className={stageClass}>
+              <video
+                src={item.media_url}
+                poster={item.thumbnail_url ?? undefined}
+                controls
+                playsInline
+                className={mediaClass}
+              />
+            </div>
           );
         }
 
         return (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={item.media_url}
-            src={item.media_url}
-            alt=""
-            className="w-full rounded-2xl border border-stone-200 object-cover"
-          />
+          <div key={item.media_url} className={stageClass}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={item.media_url} alt="" className={mediaClass} />
+          </div>
         );
       })}
-    </section>
+    </div>
   );
 }

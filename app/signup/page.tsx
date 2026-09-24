@@ -1,4 +1,5 @@
 import { AuthForm } from "@/components/auth-form";
+import { Page } from "@/components/ui/page";
 import { isMockMode } from "@/lib/data/mode";
 import { safeNextPath } from "@/lib/paths";
 
@@ -10,13 +11,13 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
   const { error, next } = await searchParams;
 
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-12">
+    <Page>
       <AuthForm
         mode="signup"
         error={error}
         next={safeNextPath(next) ?? undefined}
         demoHint={isMockMode()}
       />
-    </main>
+    </Page>
   );
 }

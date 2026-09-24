@@ -38,6 +38,10 @@ body {
     @apply mx-auto w-full max-w-5xl px-4 py-8 sm:py-10;
   }
 
+  .fh-page-home {
+    @apply mx-auto w-full max-w-[1560px] px-4 py-5 sm:px-6 sm:py-7;
+  }
+
   .fh-page-narrow {
     @apply mx-auto w-full max-w-2xl px-4 py-8 sm:py-10;
   }
@@ -47,22 +51,41 @@ body {
   }
 
   .fh-hero {
-    @apply text-[1.75rem] font-semibold leading-[1.15] tracking-tight text-ink sm:text-4xl;
+    @apply text-[1.85rem] font-semibold leading-[1.12] tracking-tight text-ink sm:text-[2.75rem];
+  }
+
+  .fh-slogan {
+    @apply text-[2.15rem] font-semibold leading-[1.05] tracking-tight text-ink sm:text-[3.35rem] lg:text-[3.75rem];
   }
 
   .fh-place {
-    @apply text-[0.7rem] font-semibold uppercase tracking-[0.08em] text-geo;
+    @apply text-sm font-semibold uppercase tracking-[0.12em] text-geo;
   }
 
-  .fh-geo-wash {
+  .fh-place-lg {
+    @apply text-base font-semibold uppercase tracking-[0.14em] text-geo sm:text-xl;
+  }
+
+  .fh-hero-geo {
+    background-color: color-mix(in srgb, var(--color-geo-soft) 70%, var(--color-canvas));
     background-image:
-      linear-gradient(180deg, rgb(47 93 98 / 0.08), transparent 58%),
-      radial-gradient(circle at 1px 1px, rgb(47 93 98 / 0.16) 1px, transparent 0);
-    background-size: auto, 22px 22px;
+      linear-gradient(180deg, rgb(47 93 98 / 0.16), transparent 62%),
+      repeating-linear-gradient(90deg, rgb(47 93 98 / 0.11) 0 1px, transparent 1px 48px),
+      repeating-linear-gradient(0deg, rgb(47 93 98 / 0.09) 0 1px, transparent 1px 36px),
+      radial-gradient(circle at 18% 42%, rgb(122 36 56 / 0.08), transparent 28%),
+      radial-gradient(circle at 78% 30%, rgb(181 106 76 / 0.12), transparent 32%);
+  }
+
+  .fh-live-stage {
+    @apply bg-ink text-surface;
+  }
+
+  .fh-demand {
+    @apply text-sm font-semibold text-earth;
   }
 
   .fh-geo-rule {
-    @apply border-t border-geo/20;
+    @apply border-t border-geo/25;
   }
 
   .fh-title {

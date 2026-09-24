@@ -1,6 +1,7 @@
 import type { LocationRow } from "@/lib/data/mappers";
 import { toLocationSummary } from "@/lib/data/mappers";
 import type { Profile } from "@/lib/database.types";
+import type { LiveStreamSummary } from "@/lib/live";
 import type { FirsthandReport, PlaceCovered, ReporterStats } from "@/lib/types";
 
 export type ReporterProfilePage = {
@@ -9,7 +10,11 @@ export type ReporterProfilePage = {
   latestReports: FirsthandReport[];
   licensingReports: FirsthandReport[];
   placesCovered: PlaceCovered[];
+  liveNow: LiveStreamSummary[];
+  pastLive: LiveStreamSummary[];
 };
+
+export type ReporterProfileTab = "reporting" | "live" | "places" | "footage";
 
 export function countLabel(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -19,11 +24,16 @@ export function assembleReporterProfilePage(
   profile: Profile,
   reports: FirsthandReport[],
   locationsById: Map<string, LocationRow>,
-  extras?: Partial<Pick<ReporterStats, "followerCount" | "supportCount" | "correctionCount" | "completedLicensingCount">>,
+  extras?: Partial<Pick<ReporterStats, "followerCount" | "supportCount" | "correctionCount" | "completedLicensingCount">> & {
+    liveNow?: LiveStreamSummary[];
+    pastLive?: LiveStreamSummary[];
+  },
 ): ReporterProfilePage {
   const latestReports = [...reports].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
   const placesCovered = buildPlacesCovered(latestReports, locationsById);
   const licensingReports = latestReports.filter((report) => report.licensingStatus === "licensing_available");
+  const liveNow = extras?.liveNow ?? [];
+  const pastLive = extras?.pastLive ?? [];
 
   return {
     profile,
@@ -31,7 +41,29 @@ export function assembleReporterProfilePage(
     latestReports,
     licensingReports,
     placesCovered,
+    liveNow,
+    pastLive,
   };
+}
+
+export function compactReporterStatsLine(stats: ReporterStats, livestreamCount = 0) {
+  const parts = [
+    countLabel(stats.reportCount, "report", "reports"),
+    countLabel(stats.locationCount, "place", "places"),
+    countLabel(stats.followerCount, "follower", "followers"),
+  ];
+  if (livestreamCount > 0) {
+    parts.push(countLabel(livestreamCount, "livestream", "livestreams"));
+  }
+  return parts.join(" · ");
+}
+
+export function parseReporterProfileTab(value: string | string[] | undefined): ReporterProfileTab {
+  const tab = Array.isArray(value) ? value[0] : value;
+  if (tab === "live" || tab === "places" || tab === "footage" || tab === "reporting") {
+    return tab;
+  }
+  return "reporting";
 }
 
 export function buildPlacesCovered(

@@ -3,6 +3,7 @@ import type { LocationSummary } from "@/lib/types";
 export type DiscoveryPlace = LocationSummary & {
   reportCount: number;
   openRequestCount: number;
+  liveCount: number;
 };
 
 export type PlaceArchiveSort =
@@ -22,6 +23,7 @@ export function aggregateDiscoveryPlaces(input: {
   reports: Array<{ locationId?: string }>;
   openRequests: Array<{ locationSlug?: string; location?: string }>;
   openRequestLocationIds: string[];
+  liveLocationIds?: string[];
 }): DiscoveryPlace[] {
   const reportCounts = new Map<string, number>();
   for (const report of input.reports) {
@@ -36,14 +38,20 @@ export function aggregateDiscoveryPlaces(input: {
     requestCounts.set(locationId, (requestCounts.get(locationId) ?? 0) + 1);
   }
 
+  const liveCounts = new Map<string, number>();
+  for (const locationId of input.liveLocationIds ?? []) {
+    liveCounts.set(locationId, (liveCounts.get(locationId) ?? 0) + 1);
+  }
+
   return input.locations
     .filter((location) => location.latitude !== null && location.longitude !== null)
     .map((location) => ({
       ...location,
       reportCount: reportCounts.get(location.id) ?? 0,
       openRequestCount: requestCounts.get(location.id) ?? 0,
+      liveCount: liveCounts.get(location.id) ?? 0,
     }))
-    .filter((place) => place.reportCount > 0 || place.openRequestCount > 0);
+    .filter((place) => place.reportCount > 0 || place.openRequestCount > 0 || place.liveCount > 0);
 }
 
 export function parsePlaceArchiveFilters(searchParams: {

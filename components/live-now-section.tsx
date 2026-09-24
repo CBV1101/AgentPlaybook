@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { AuthRequiredLink } from "@/components/auth-required-link";
-import { FeaturedLiveStream, LiveStreamCard } from "@/components/featured-live-stream";
-import { EmptyState, Section } from "@/components/ui/page";
+import { LiveStreamGrid } from "@/components/live-stream-grid";
+import { EmptyState } from "@/components/ui/page";
 import type { RankedLiveStream } from "@/lib/live-rank";
 
 export function LiveNowSection({
@@ -10,26 +11,24 @@ export function LiveNowSection({
   ranked: RankedLiveStream[];
   signedIn: boolean;
 }) {
-  const featured = ranked[0];
-  const secondary = ranked.slice(1, 5);
-
   return (
-    <Section kicker="Live now" title={featured ? "Live firsthand reporting" : "Nothing live right now"}>
-      {featured ? (
-        <div className="mt-4 space-y-4">
-          <FeaturedLiveStream stream={featured.stream} demandCount={featured.demandCount} />
-          {secondary.length > 0 ? (
-            <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1 sm:mx-0 sm:grid sm:grid-cols-2 sm:overflow-visible sm:px-0 lg:grid-cols-4">
-              {secondary.map((item) => (
-                <LiveStreamCard
-                  key={item.stream.id}
-                  stream={item.stream}
-                  demandCount={item.demandCount}
-                  compact
-                />
-              ))}
-            </div>
-          ) : null}
+    <section className="mt-10">
+      <div className="flex items-end justify-between gap-4">
+        <div>
+          <p className="fh-kicker text-live">Live now</p>
+          <h2 className="mt-1 fh-section">
+            {ranked[0] ? "People around the world are live right now." : "Nothing live right now"}
+          </h2>
+        </div>
+        {ranked[0] ? (
+          <Link href="/browse" className="shrink-0 text-sm font-medium text-ink underline underline-offset-2">
+            View all live →
+          </Link>
+        ) : null}
+      </div>
+      {ranked[0] ? (
+        <div className="mt-6">
+          <LiveStreamGrid streams={ranked} showMore={false} />
         </div>
       ) : (
         <EmptyState title="No one is broadcasting a live firsthand report at this moment.">
@@ -40,6 +39,6 @@ export function LiveNowSection({
           </p>
         </EmptyState>
       )}
-    </Section>
+    </section>
   );
 }

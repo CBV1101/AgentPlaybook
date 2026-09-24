@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import { Field, SearchInput } from "@/components/ui/field";
 import type { GeocodeSuggestion } from "@/lib/location";
 
 type GeocodedLocationFieldProps = {
   initialQuery?: string;
+  onSelectedChange?: (suggestion: GeocodeSuggestion | null) => void;
 };
 
-export function GeocodedLocationField({ initialQuery = "" }: GeocodedLocationFieldProps) {
+export function GeocodedLocationField({ initialQuery = "", onSelectedChange }: GeocodedLocationFieldProps) {
   const listId = useId();
   const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<GeocodeSuggestion[]>([]);
@@ -62,6 +64,7 @@ export function GeocodedLocationField({ initialQuery = "" }: GeocodedLocationFie
 
   function choose(suggestion: GeocodeSuggestion) {
     setSelected(suggestion);
+    onSelectedChange?.(suggestion);
     setQuery(suggestion.label);
     setOpen(false);
     setResults([]);
@@ -71,47 +74,41 @@ export function GeocodedLocationField({ initialQuery = "" }: GeocodedLocationFie
 
   return (
     <div className="relative">
-      <label htmlFor="location-query" className="block text-sm font-medium text-stone-700">
-        Location
-      </label>
-      <input
-        id="location-query"
-        type="search"
-        autoComplete="off"
-        role="combobox"
-        aria-expanded={open}
-        aria-controls={listId}
-        placeholder="Görlitzer Park, Berlin, Germany"
-        value={query}
-        onChange={(event) => {
-          const value = event.target.value;
-          setSelected(null);
-          setQuery(value);
-          if (value.trim().length < 2) {
-            setResults([]);
-            setOpen(false);
-            setError(null);
-          }
-        }}
-        onFocus={() => {
-          if (visibleResults.length > 0) {
-            setOpen(true);
-          }
-        }}
-        className="mt-1 min-h-12 w-full rounded-xl border border-stone-300 px-3 py-3 text-base outline-none focus:border-stone-500"
-      />
-      <p className="mt-1 text-xs text-stone-500">
-        Search for a place, then choose a result so we can store country, city, coordinates, and a
-        map pin.
-      </p>
-      {loading ? <p className="mt-1 text-xs text-stone-500">Searching places…</p> : null}
-      {error ? <p className="mt-1 text-xs text-rose-800">{error}</p> : null}
+      <Field label="Location" htmlFor="location-query" hint="Search for a place, then choose a result so we can store country, city, coordinates, and a map pin.">
+        <SearchInput
+          id="location-query"
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listId}
+          placeholder="Görlitzer Park, Berlin, Germany"
+          value={query}
+          onChange={(event) => {
+            const value = event.target.value;
+            setSelected(null);
+            onSelectedChange?.(null);
+            setQuery(value);
+            if (value.trim().length < 2) {
+              setResults([]);
+              setOpen(false);
+              setError(null);
+            }
+          }}
+          onFocus={() => {
+            if (visibleResults.length > 0) {
+              setOpen(true);
+            }
+          }}
+        />
+      </Field>
+      {loading ? <p className="mt-1 text-xs text-faint">Searching places…</p> : null}
+      {error ? <p className="mt-1 text-xs text-danger">{error}</p> : null}
 
       {open && visibleResults.length > 0 ? (
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-10 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-stone-200 bg-white py-1 shadow-lg"
+          className="fh-menu absolute z-10 mt-1 max-h-64 w-full overflow-auto py-1"
         >
           {visibleResults.map((result) => (
             <li key={`${result.label}-${result.latitude}-${result.longitude}`}>
@@ -119,11 +116,11 @@ export function GeocodedLocationField({ initialQuery = "" }: GeocodedLocationFie
                 type="button"
                 role="option"
                 aria-selected={selected?.label === result.label}
-          className="min-h-12 w-full px-3 py-3 text-left text-sm hover:bg-stone-50"
+                className="min-h-12 w-full px-3 py-3 text-left text-sm hover:bg-canvas"
                 onClick={() => choose(result)}
               >
-                <span className="block text-stone-900">{result.label}</span>
-                <span className="block text-xs text-stone-500">
+                <span className="block text-ink">{result.label}</span>
+                <span className="block text-xs text-faint">
                   {result.latitude.toFixed(4)}, {result.longitude.toFixed(4)}
                 </span>
               </button>

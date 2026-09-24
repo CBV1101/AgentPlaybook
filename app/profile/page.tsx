@@ -1,42 +1,65 @@
 import Link from "next/link";
 import { signOut } from "@/lib/auth-actions";
 import { getCurrentUser } from "@/lib/auth";
+import { ReporterProfileForm } from "@/components/reporter-profile-form";
+import { Button, buttonClass } from "@/components/ui/button";
+import { Notice, Page, Section } from "@/components/ui/page";
 import { isMockMode } from "@/lib/data/mode";
 import { getProfileByUserId } from "@/lib/queries";
 import { loginPath, safeNextPath, signupPath } from "@/lib/paths";
+import { isReporterProfileComplete, type ReporterTopic } from "@/lib/profile";
 
 type ProfilePageProps = {
-  searchParams: Promise<{ notice?: string; next?: string }>;
+  searchParams: Promise<{ notice?: string; next?: string; error?: string }>;
 };
 
 export default async function ProfilePage({ searchParams }: ProfilePageProps) {
-  const { notice, next } = await searchParams;
+  const { notice, next, error } = await searchParams;
   const user = await getCurrentUser();
   const returnTo = safeNextPath(next);
   const profile = user ? await getProfileByUserId(user.id) : null;
+  const setup = Boolean(profile && !isReporterProfileComplete(profile));
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-12">
-      <h1 className="font-[family-name:var(--font-display)] text-3xl text-stone-900">Account</h1>
-      <p className="mt-2 text-stone-600">
-        Manage your sign-in. Your public reporting portfolio is separate from this account page.
+    <Page width="narrow">
+      <h1 className="fh-title">
+        {user && setup ? "Set up your reporter profile" : "Profile"}
+      </h1>
+      <p className="mt-2 fh-lede">
+        {user && setup
+          ? "About a minute. Add a name, username, and home place so people can find your public reporter page."
+          : "Your public reporter page is separate from account settings."}
       </p>
 
       {isMockMode() ? (
-        <p className="mt-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          You are using a local mock account. Adding Supabase keys later will switch auth to the
-          live project without changing these screens.
-        </p>
+        <Notice>
+          You are using a local mock account. Adding Supabase keys later will switch auth to the live
+          project without changing these screens.
+        </Notice>
       ) : null}
 
       {notice === "check-email" ? (
-        <p className="mt-6 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          Check your email to confirm the account if your Supabase project requires confirmation.
-          {returnTo ? " After you confirm, you can continue where you left off." : null}
-        </p>
+        <Notice>
+          Check your email and open the confirmation link in this browser. After you confirm, you
+          should land on this profile page to finish setup.
+          {returnTo ? " You can then continue where you left off." : null}
+        </Notice>
       ) : null}
 
-      {user && returnTo ? (
+      {notice === "setup" ? (
+        <Notice tone="ok">
+          Account created. Finish the public reporter details below, then you can publish or go live.
+        </Notice>
+      ) : null}
+
+      {notice === "incomplete" ? (
+        <Notice>
+          Add a display name, username, home city, and home country before publishing a report or going
+          live. You can keep browsing in the meantime.
+        </Notice>
+      ) : null}
+
+      {user && returnTo && notice !== "incomplete" ? (
         <p className="mt-4 text-sm">
           <Link href={returnTo} className="underline">
             Continue where you left off
@@ -44,31 +67,61 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
         </p>
       ) : null}
 
-      <section className="mt-8 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-        {user ? (
-          <div className="space-y-4">
-            <p className="text-stone-700">
-              Signed in as <span className="font-medium">{user.email}</span>
+      {user && !profile ? (
+        <Section>
+          <p className="fh-body">
+            You are signed in as <span className="font-medium">{user.email || "this account"}</span>,
+            but a reporter profile has not been created yet. Refresh this page. If it still fails,
+            sign out and sign in once more before creating coverage or reports.
+          </p>
+        </Section>
+      ) : user && profile ? (
+        <>
+          <Section kicker="Public profile" title={setup ? "Reporter details" : "Edit public profile"}>
+            <p className="mt-2 fh-meta">
+              This appears on{" "}
+              <Link href={`/u/${profile.username}`} className="underline">
+                /u/{profile.username}
+              </Link>
+              . Report counts, places covered, followers, and support stay activity-based.
             </p>
-            {profile ? (
-              <p className="text-sm text-stone-600">
-                Public reporting page:{" "}
-                <Link href={`/u/${profile.username}`} className="underline">
-                  /u/{profile.username}
-                </Link>
-              </p>
-            ) : null}
-            <form action={signOut}>
-              <button
-                type="submit"
-                className="rounded-full border border-stone-300 px-4 py-2 text-sm hover:bg-stone-50"
-              >
+            <div className="mt-6">
+              <ReporterProfileForm
+                username={profile.username}
+                displayName={profile.display_name}
+                bio={profile.bio ?? ""}
+                homeCity={profile.home_city ?? ""}
+                homeCountry={profile.home_country ?? ""}
+                avatarUrl={profile.avatar_url}
+                topics={(profile.topics ?? []) as ReporterTopic[]}
+                nextPath={returnTo}
+                error={error}
+              />
+            </div>
+          </Section>
+
+          <Section kicker="Account & settings" title="Signed in">
+            <p className="mt-2 fh-body">
+              Email: <span className="font-medium">{user.email}</span>
+            </p>
+            <div className="mt-4 flex flex-wrap gap-3">
+              <Link href="/notifications" className={buttonClass("secondary")}>
+                Notifications
+              </Link>
+              <Link href="/profile/licensing" className={buttonClass("secondary")}>
+                Licensing
+              </Link>
+            </div>
+            <form action={signOut} className="mt-6">
+              <Button type="submit" variant="secondary">
                 Log out
-              </button>
+              </Button>
             </form>
-          </div>
-        ) : (
-          <p className="text-stone-700">
+          </Section>
+        </>
+      ) : (
+        <Section>
+          <p className="fh-body">
             You are not signed in.{" "}
             <Link href={loginPath(returnTo)} className="underline">
               Log in
@@ -79,8 +132,8 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
             </Link>
             .
           </p>
-        )}
-      </section>
-    </main>
+        </Section>
+      )}
+    </Page>
   );
 }

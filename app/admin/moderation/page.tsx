@@ -1,6 +1,15 @@
 import Link from "next/link";
-import { dismissModerationReport, markModerationReviewed, removeReportedContentAction } from "@/lib/moderation-actions";
+import { Button, buttonClass } from "@/components/ui/button";
+import { EmptyState, Notice, Page, Section } from "@/components/ui/page";
+import {
+  dismissModerationReport,
+  markModerationReviewed,
+  removeReportedContentAction,
+  setLivePrivilegeAction,
+  terminateLivestreamAction,
+} from "@/lib/moderation-actions";
 import { listModerationReports } from "@/lib/queries";
+import { liveStatusLabel } from "@/lib/live";
 import { moderationReasonLabel } from "@/lib/moderation";
 import { requireAdmin } from "@/lib/require-admin";
 
@@ -12,6 +21,9 @@ const noticeCopy: Record<string, string> = {
   dismissed: "That report was dismissed.",
   reviewed: "Marked as reviewed.",
   removed: "The content was removed from public view.",
+  terminated: "The livestream was terminated. It is no longer shown as live.",
+  "live-disabled": "Live streaming was disabled for that reporter.",
+  "live-enabled": "Live streaming was enabled for that reporter.",
 };
 
 export default async function AdminModerationPage({ searchParams }: AdminModerationPageProps) {
@@ -22,22 +34,19 @@ export default async function AdminModerationPage({ searchParams }: AdminModerat
   const otherItems = items.filter((item) => item.status !== "open");
 
   return (
-    <main className="mx-auto w-full max-w-4xl px-4 py-10">
-      <p className="text-sm uppercase tracking-[0.2em] text-rose-800">Admin</p>
-      <h1 className="mt-3 font-[family-name:var(--font-display)] text-4xl text-stone-950">
-        Moderation
-      </h1>
-      <p className="mt-3 max-w-2xl text-stone-600">
-        Human review only. Open a piece of content, dismiss a report, or remove it from public view.
+    <Page>
+      <p className="fh-kicker">Admin</p>
+      <h1 className="mt-3 fh-hero">Moderation</h1>
+      <p className="mt-3 max-w-2xl fh-lede">
+        Human review only. Live streams can be harmful in real time; terminate a broadcast without
+        deleting the record. There is no automated or AI moderation.
       </p>
 
-      {notice && noticeCopy[notice] ? (
-        <p className="mt-4 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-900">{noticeCopy[notice]}</p>
-      ) : null}
+      {notice && noticeCopy[notice] ? <Notice tone="ok">{noticeCopy[notice]}</Notice> : null}
 
       <QueueSection title="Open reports" items={openItems} empty="No open reports." />
       <QueueSection title="Closed reports" items={otherItems} empty="No reviewed, dismissed, or removed reports yet." />
-    </main>
+    </Page>
   );
 }
 
@@ -51,63 +60,119 @@ function QueueSection({
   empty: string;
 }) {
   return (
-    <section className="mt-10">
-      <h2 className="font-[family-name:var(--font-display)] text-2xl text-stone-900">{title}</h2>
+    <Section title={title}>
       {items.length === 0 ? (
-        <p className="mt-4 text-stone-600">{empty}</p>
+        <EmptyState title={empty} />
       ) : (
-        <ul className="mt-4 grid gap-4">
+        <ul className="mt-4">
           {items.map((item) => (
-            <li key={item.id} className="rounded-2xl border border-stone-200 bg-white p-5">
+            <li key={item.id} className="fh-list-row">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs uppercase tracking-wide text-stone-500">{item.status}</p>
-                  <p className="mt-1 text-lg font-medium text-stone-900">{item.contentTitle}</p>
-                  <p className="mt-1 text-sm text-stone-600">
-                    {item.contentType === "coverage_request" ? "Coverage request" : "Firsthand report"} ·{" "}
-                    {moderationReasonLabel(item.reason)} · reported by @{item.submittedByUsername}
+                  <p className="fh-label">{item.status}</p>
+                  <p className="mt-1 fh-report-title">{item.contentTitle}</p>
+                  <p className="mt-1 fh-meta">
+                    {item.contentType === "coverage_request"
+                      ? "Coverage request"
+                      : item.contentType === "live_stream"
+                        ? "Livestream"
+                        : "Firsthand report"}{" "}
+                    · {moderationReasonLabel(item.reason)} · reported by @{item.submittedByUsername}
                   </p>
-                  {item.details ? <p className="mt-2 text-sm text-stone-700">{item.details}</p> : null}
+                  {item.liveStream ? (
+                    <dl className="mt-3 grid gap-1 fh-meta">
+                      <div>
+                        Reporter{" "}
+                        <Link href={`/u/${item.liveStream.reporterUsername}`} className="underline">
+                          {item.liveStream.reporterName}
+                        </Link>
+                      </div>
+                      <div>Stream title {item.contentTitle}</div>
+                      <div>Location {item.liveStream.locationLabel}</div>
+                      {item.liveStream.eventTitle ? <div>Event {item.liveStream.eventTitle}</div> : null}
+                      <div>Current stream status {liveStatusLabel(item.liveStream.streamStatus)}</div>
+                      <div>
+                        Number of reports received {item.liveStream.reportCount}
+                      </div>
+                    </dl>
+                  ) : null}
+                  {item.details ? <p className="mt-2 fh-body">{item.details}</p> : null}
                   {item.contentRemoved ? (
-                    <p className="mt-2 text-sm text-rose-800">This content is already removed from public view.</p>
+                    <p className="mt-2 text-sm text-danger">
+                      {item.contentType === "live_stream"
+                        ? "This livestream is already terminated."
+                        : "This content is already removed from public view."}
+                    </p>
                   ) : null}
                 </div>
-                <Link
-                  href={item.contentHref}
-                  className="inline-flex min-h-10 items-center rounded-full border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-                >
+                <Link href={item.contentHref} className={buttonClass("secondary")}>
                   Open content
                 </Link>
               </div>
 
               {item.status === "open" ? (
                 <div className="mt-4 flex flex-wrap gap-2">
-                  <form action={markModerationReviewed}>
-                    <input type="hidden" name="id" value={item.id} />
-                    <button
-                      type="submit"
-                      className="min-h-10 rounded-full border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-                    >
-                      Mark reviewed
-                    </button>
-                  </form>
+                  {item.contentType !== "live_stream" ? (
+                    <form action={markModerationReviewed}>
+                      <input type="hidden" name="id" value={item.id} />
+                      <Button type="submit" variant="secondary">
+                        Mark reviewed
+                      </Button>
+                    </form>
+                  ) : null}
                   <form action={dismissModerationReport}>
                     <input type="hidden" name="id" value={item.id} />
-                    <button
-                      type="submit"
-                      className="min-h-10 rounded-full border border-stone-300 px-3 py-1.5 text-sm font-medium text-stone-800 hover:bg-stone-50"
-                    >
-                      Dismiss
-                    </button>
+                    <Button type="submit" variant="secondary">
+                      Dismiss report
+                    </Button>
                   </form>
-                  <form action={removeReportedContentAction}>
-                    <input type="hidden" name="id" value={item.id} />
-                    <button
-                      type="submit"
-                      className="min-h-10 rounded-full bg-rose-800 px-3 py-1.5 text-sm font-medium text-rose-50 hover:bg-rose-700"
-                    >
-                      Remove content
-                    </button>
+                  {item.contentType === "live_stream" ? (
+                    <>
+                      <form action={terminateLivestreamAction}>
+                        <input type="hidden" name="id" value={item.id} />
+                        <Button type="submit" variant="danger">
+                          Terminate livestream
+                        </Button>
+                      </form>
+                      {item.liveStream ? (
+                        <form action={setLivePrivilegeAction}>
+                          <input type="hidden" name="reporter_id" value={item.liveStream.reporterId} />
+                          <input
+                            type="hidden"
+                            name="enabled"
+                            value={item.liveStream.reporterCanLiveStream ? "false" : "true"}
+                          />
+                          <Button type="submit" variant="secondary">
+                            {item.liveStream.reporterCanLiveStream
+                              ? "Disable live streaming for reporter"
+                              : "Enable live streaming for reporter"}
+                          </Button>
+                        </form>
+                      ) : null}
+                    </>
+                  ) : (
+                    <form action={removeReportedContentAction}>
+                      <input type="hidden" name="id" value={item.id} />
+                      <Button type="submit" variant="danger">
+                        Remove content
+                      </Button>
+                    </form>
+                  )}
+                </div>
+              ) : item.contentType === "live_stream" && item.liveStream ? (
+                <div className="mt-4">
+                  <form action={setLivePrivilegeAction}>
+                    <input type="hidden" name="reporter_id" value={item.liveStream.reporterId} />
+                    <input
+                      type="hidden"
+                      name="enabled"
+                      value={item.liveStream.reporterCanLiveStream ? "false" : "true"}
+                    />
+                    <Button type="submit" variant="secondary">
+                      {item.liveStream.reporterCanLiveStream
+                        ? "Disable live streaming for reporter"
+                        : "Enable live streaming for reporter"}
+                    </Button>
                   </form>
                 </div>
               ) : null}
@@ -115,6 +180,6 @@ function QueueSection({
           ))}
         </ul>
       )}
-    </section>
+    </Section>
   );
 }

@@ -20,8 +20,10 @@
 # production
 /build
 
-# misc
+# macOS
 .DS_Store
+
+# keys and certificates
 *.pem
 
 # debug
@@ -30,8 +32,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files
+# Secrets. Never commit .env.local, API keys, Supabase secrets, or Cloudflare credentials.
 .env
+.env.local
 .env.*
 !.env.example
 
@@ -48,4 +51,6 @@ next-env.d.ts
 
 .cursor/
 *.log
+
+# Local mock database and generated media (photos/videos stored without Supabase/Cloudflare)
 .local/

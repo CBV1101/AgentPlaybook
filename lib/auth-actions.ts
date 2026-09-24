@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { isMockMode } from "@/lib/data/mode";
 import { mockSignIn, mockSignUp } from "@/lib/data/mock/repository";
 import { clearMockUser, setMockUser } from "@/lib/data/mock/session";
-import { loginPath, safeNextPath, signupPath } from "@/lib/paths";
+import { loginPath, afterSignupPath, safeNextPath, signupPath } from "@/lib/paths";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { createClient } from "@/lib/supabase/server";
 
@@ -42,7 +42,7 @@ export async function signUp(formData: FormData) {
       const message = error instanceof Error ? error.message : "Could not create the account.";
       redirect(withAuthError(signupPath(next), message));
     }
-    redirect(next ?? "/");
+    redirect(afterSignupPath(next));
   }
 
   if (!isSupabaseConfigured()) {
@@ -50,12 +50,13 @@ export async function signUp(formData: FormData) {
   }
 
   const origin = await siteOrigin();
+  const continueTo = afterSignupPath(next);
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
-      emailRedirectTo: `${origin}/auth/callback${next ? `?next=${encodeURIComponent(next)}` : ""}`,
+      emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(continueTo)}`,
     },
   });
 
@@ -64,10 +65,10 @@ export async function signUp(formData: FormData) {
   }
 
   if (data.session) {
-    redirect(next ?? "/");
+    redirect(continueTo);
   }
 
-  redirect(next ? `/profile?notice=check-email&next=${encodeURIComponent(next)}` : "/profile?notice=check-email");
+  redirect(`/profile?notice=check-email${next ? `&next=${encodeURIComponent(next)}` : ""}`);
 }
 
 export async function signIn(formData: FormData) {

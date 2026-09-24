@@ -1,4 +1,5 @@
 import { RequestForm } from "@/components/request-form";
+import { Page } from "@/components/ui/page";
 import { requireUser } from "@/lib/require-user";
 
 type NewRequestPageProps = {
@@ -10,16 +11,14 @@ export default async function NewRequestPage({ searchParams }: NewRequestPagePro
   const { error } = await searchParams;
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-4 py-10">
-      <h1 className="font-[family-name:var(--font-display)] text-3xl text-stone-900">
-        Request coverage
-      </h1>
-      <p className="mt-2 text-stone-600">
+    <Page width="narrow">
+      <h1 className="fh-title">Request coverage</h1>
+      <p className="mt-2 fh-lede">
         Ask someone to go to a place and report what is happening there firsthand.
       </p>
       <div className="mt-8">
         <RequestForm error={error} />
       </div>
-    </main>
+    </Page>
   );
 }

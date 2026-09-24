@@ -8,7 +8,11 @@ function isUuid(value: string) {
 }
 
 export function RequestCard({ request }: { request: CoverageRequest }) {
-  const locationContent = request.locationSlug ? (
+  const locationContent = request.locationHref ? (
+    <Link href={request.locationHref} className="hover:underline">
+      {request.location}
+    </Link>
+  ) : request.locationSlug ? (
     <Link href={`/place/${request.locationSlug}`} className="hover:underline">
       {request.location}
     </Link>
@@ -16,15 +20,11 @@ export function RequestCard({ request }: { request: CoverageRequest }) {
     request.location
   );
 
-  const title = (
-    <h3 className="mt-2 font-[family-name:var(--font-display)] text-lg text-stone-900">
-      {request.title}
-    </h3>
-  );
+  const title = <h3 className="mt-2 fh-report-title">{request.title}</h3>;
 
   return (
-    <article className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-      <p className="text-xs uppercase tracking-wide text-stone-500">{locationContent}</p>
+    <article className="fh-content-card p-4">
+      <p className="fh-meta">{locationContent}</p>
       {isUuid(request.id) ? (
         <Link href={`/requests/${request.id}`} className="block hover:underline">
           {title}
@@ -32,7 +32,7 @@ export function RequestCard({ request }: { request: CoverageRequest }) {
       ) : (
         title
       )}
-      <p className="mt-3 text-sm text-stone-600">
+      <p className="mt-3 fh-meta">
         {request.supporterCount} {request.supporterCount === 1 ? "person wants" : "people want"} this
         covered
       </p>

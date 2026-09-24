@@ -35,7 +35,7 @@ export function Badge({
 
 export function LiveBadge({ className }: { className?: string }) {
   return (
-    <Badge tone="live" className={className}>
+    <Badge tone="live" className={cn("px-2 py-1 text-[11px] sm:text-xs", className)}>
       Live
     </Badge>
   );
@@ -53,13 +53,15 @@ export function LocationLabel({
   city?: string;
   country?: string;
   href?: string;
-  size?: "hero" | "card" | "inline";
+  size?: "hero" | "card" | "inline" | "overlay";
   className?: string;
 }) {
   const label = city && country ? `${city}, ${country}` : children;
   const classes = cn(
-    size === "inline" ? "fh-meta" : "fh-place",
-    size === "hero" && "text-xs sm:text-sm",
+    size === "inline" && "fh-meta",
+    size === "card" && "fh-place",
+    size === "hero" && "fh-place-lg",
+    size === "overlay" && "text-sm font-semibold uppercase tracking-[0.14em] text-surface sm:text-xl",
     className,
   );
 

@@ -1,11 +1,10 @@
 import Link from "next/link";
+import type { ComponentProps } from "react";
 import { loginPath } from "@/lib/paths";
 
-type AuthRequiredLinkProps = {
+type AuthRequiredLinkProps = Omit<ComponentProps<typeof Link>, "href"> & {
   href: string;
   isAuthenticated: boolean;
-  className?: string;
-  children: React.ReactNode;
 };
 
 export function AuthRequiredLink({
@@ -13,9 +12,10 @@ export function AuthRequiredLink({
   isAuthenticated,
   className,
   children,
+  ...rest
 }: AuthRequiredLinkProps) {
   return (
-    <Link href={isAuthenticated ? href : loginPath(href)} className={className}>
+    <Link href={isAuthenticated ? href : loginPath(href)} className={className} {...rest}>
       {children}
     </Link>
   );

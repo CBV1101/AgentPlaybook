@@ -2,22 +2,25 @@ import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { mockMediaDirectory } from "@/lib/data/mock/store";
-import { isVideoFile } from "@/lib/media/classify";
-import type { StoredMedia } from "@/lib/media/types";
+import type { MediaType } from "@/lib/types";
 
-export async function uploadLocalMedia(file: File): Promise<StoredMedia> {
+export async function writeLocalMediaFile(input: {
+  bytes: Uint8Array;
+  filename: string;
+  mediaType: MediaType;
+}) {
   const mediaId = randomUUID();
-  const extension = file.name.includes(".") ? file.name.slice(file.name.lastIndexOf(".")) : "";
+  const extension = input.filename.includes(".")
+    ? input.filename.slice(input.filename.lastIndexOf("."))
+    : input.mediaType === "video"
+      ? ".mp4"
+      : ".jpg";
   const storedName = `${mediaId}${extension}`;
-  await writeFile(join(mockMediaDirectory(), storedName), Buffer.from(await file.arrayBuffer()));
+  await writeFile(join(mockMediaDirectory(), storedName), input.bytes);
   const mediaUrl = `/api/local-media/${storedName}`;
-  const mediaType = isVideoFile(file) ? "video" : "photo";
-
   return {
-    mediaType,
+    storedName,
     mediaUrl,
-    thumbnailUrl: mediaType === "photo" ? mediaUrl : null,
-    originalFilename: file.name,
-    provider: "local",
+    thumbnailUrl: input.mediaType === "photo" ? mediaUrl : null,
   };
 }

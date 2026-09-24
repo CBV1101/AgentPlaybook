@@ -1,4 +1,5 @@
 import type { MockDatabase } from "@/lib/data/mock/seed";
+import { uploadProvenanceFields } from "@/lib/media/provenance";
 
 const ids = {
   linnea: "44444444-4444-4444-8444-444444444444",
@@ -60,6 +61,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       home_country: "Sweden",
       created_at: "2026-02-20T09:00:00.000Z",
       role: "member",
+      topics: ["community", "local_news"],
     },
     {
       id: ids.mateo,
@@ -71,6 +73,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       home_country: "Spain",
       created_at: "2026-01-14T12:00:00.000Z",
       role: "member",
+      topics: ["transportation", "local_news"],
     },
     {
       id: ids.fatima,
@@ -82,6 +85,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       home_country: "Spain",
       created_at: "2026-03-01T08:30:00.000Z",
       role: "member",
+      topics: ["community", "weather"],
     },
   );
 
@@ -138,6 +142,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-10T17:05:00.000Z",
       status: "open",
       removed_at: null,
+      event_id: null,
     },
     {
       id: ids.reqTempelhof,
@@ -148,6 +153,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-07T10:00:00.000Z",
       status: "open",
       removed_at: null,
+      event_id: null,
     },
     {
       id: ids.reqKarlstadMarket,
@@ -158,6 +164,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-05T18:00:00.000Z",
       status: "open",
       removed_at: null,
+      event_id: null,
     },
     {
       id: ids.reqKarlstadSquare2,
@@ -168,6 +175,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-09T07:20:00.000Z",
       status: "open",
       removed_at: null,
+      event_id: null,
     },
     {
       id: ids.reqKarlstadRiver,
@@ -178,6 +186,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-08T11:10:00.000Z",
       status: "open",
       removed_at: null,
+      event_id: null,
     },
     {
       id: ids.reqCeutaPlaza,
@@ -188,6 +197,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-09T12:00:00.000Z",
       status: "open",
       removed_at: null,
+      event_id: null,
     },
     {
       id: ids.reqCeutaPlaza2,
@@ -198,6 +208,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-06T19:40:00.000Z",
       status: "open",
       removed_at: null,
+      event_id: null,
     },
     {
       id: ids.reqCeutaPort,
@@ -208,6 +219,7 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-10T06:15:00.000Z",
       status: "open",
       removed_at: null,
+      event_id: null,
     },
   );
 
@@ -233,6 +245,8 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-10T21:40:00.000Z",
       licensing_status: "licensing_available",
       removed_at: null,
+      event_id: null,
+      publish_status: "published",
     },
     {
       id: ids.repParkOld,
@@ -246,6 +260,8 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-04-12T09:00:00.000Z",
       licensing_status: "view_only",
       removed_at: null,
+      event_id: null,
+      publish_status: "published",
     },
     {
       id: ids.repKarlstadMarket,
@@ -259,6 +275,8 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-06T10:44:00.000Z",
       licensing_status: "licensing_available",
       removed_at: null,
+      event_id: null,
+      publish_status: "published",
     },
     {
       id: ids.repKarlstadIndependent,
@@ -272,6 +290,8 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-08-22T12:31:00.000Z",
       licensing_status: "view_only",
       removed_at: null,
+      event_id: null,
+      publish_status: "published",
     },
     {
       id: ids.repKarlstadRiver,
@@ -285,6 +305,8 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-08T16:05:00.000Z",
       licensing_status: "view_only",
       removed_at: null,
+      event_id: null,
+      publish_status: "published",
     },
     {
       id: ids.repCeutaPlaza,
@@ -298,6 +320,8 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-09T15:48:00.000Z",
       licensing_status: "view_only",
       removed_at: null,
+      event_id: null,
+      publish_status: "published",
     },
     {
       id: ids.repCeutaPort,
@@ -311,6 +335,8 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-10T07:55:00.000Z",
       licensing_status: "licensing_available",
       removed_at: null,
+      event_id: null,
+      publish_status: "published",
     },
     {
       id: ids.repCeutaIndependent,
@@ -324,6 +350,8 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
       created_at: "2026-09-04T19:36:00.000Z",
       licensing_status: "view_only",
       removed_at: null,
+      event_id: null,
+      publish_status: "published",
     },
   );
 
@@ -344,9 +372,19 @@ export function applyGeographySeed(database: MockDatabase): MockDatabase {
   }
   for (const report of database.reports) {
     report.removed_at = null;
+    report.event_id ??= null;
+    report.publish_status ??= "published";
+  }
+  for (const item of database.report_media) {
+    item.provider ??= "local";
+    item.provider_asset_id ??= item.id;
+    item.upload_status ??= "ready";
+    item.provenance_type ??= "creator_declared";
+    item.original_sha256 ??= null;
   }
   for (const request of database.coverage_requests) {
     request.removed_at = null;
+    request.event_id ??= null;
   }
   database.moderation_reports ??= [];
 
@@ -375,5 +413,9 @@ function geoMedia(
     uploaded_at: capturedAt,
     licensing_status: licensing,
     created_at: capturedAt,
+    provider: "local" as const,
+    provider_asset_id: id,
+    upload_status: "ready" as const,
+    ...uploadProvenanceFields(),
   };
 }

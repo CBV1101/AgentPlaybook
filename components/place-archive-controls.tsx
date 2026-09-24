@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { buttonClass } from "@/components/ui/button";
 import type { PlaceArchiveFilters } from "@/lib/data/discovery";
 
 type PlaceArchiveControlsProps = {
@@ -49,17 +50,13 @@ export function PlaceArchiveControls({ slug, filters }: PlaceArchiveControlsProp
   return (
     <div className="space-y-4">
       <div>
-        <p className="text-xs uppercase tracking-wide text-stone-500">Sort archive</p>
+        <p className="fh-label">Sort archive</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {sorts.map((sort) => (
             <Link
               key={sort.id}
               href={href({ sort: sort.id })}
-              className={`min-h-10 rounded-full px-3 py-2 text-sm ${
-                filters.sort === sort.id
-                  ? "bg-stone-900 text-white"
-                  : "border border-stone-300 text-stone-800"
-              }`}
+              className={buttonClass(filters.sort === sort.id ? "primary" : "secondary")}
             >
               {sort.label}
             </Link>
@@ -67,7 +64,7 @@ export function PlaceArchiveControls({ slug, filters }: PlaceArchiveControlsProp
         </div>
       </div>
       <div>
-        <p className="text-xs uppercase tracking-wide text-stone-500">Filters</p>
+        <p className="fh-label">Filters</p>
         <div className="mt-2 flex flex-wrap gap-2">
           <Link href={toggleKind("video")} className={chip(filters.kinds.includes("video"))}>
             Video
@@ -85,7 +82,7 @@ export function PlaceArchiveControls({ slug, filters }: PlaceArchiveControlsProp
             Licensing available
           </Link>
         </div>
-        <p className="mt-2 text-xs text-stone-500">
+        <p className="mt-2 text-xs text-faint">
           Filters narrow this place archive. They are not an engagement ranking.
         </p>
       </div>
@@ -94,7 +91,5 @@ export function PlaceArchiveControls({ slug, filters }: PlaceArchiveControlsProp
 }
 
 function chip(active: boolean) {
-  return `min-h-10 rounded-full px-3 py-2 text-sm ${
-    active ? "bg-stone-900 text-white" : "border border-stone-300 text-stone-800"
-  }`;
+  return buttonClass(active ? "primary" : "secondary");
 }

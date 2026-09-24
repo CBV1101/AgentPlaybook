@@ -1,9 +1,21 @@
 export function isImageFile(file: File) {
-  return file.type.startsWith("image/");
+  return classifyUpload(file.type, file.name) === "photo";
 }
 
 export function isVideoFile(file: File) {
-  return file.type.startsWith("video/");
+  return classifyUpload(file.type, file.name) === "video";
+}
+
+export function classifyUpload(contentType: string, filename: string): "photo" | "video" | null {
+  const mime = contentType.toLowerCase();
+  const name = filename.toLowerCase();
+  if (mime.startsWith("image/") || /\.(jpe?g|png|gif|webp|heic|heif|avif)$/.test(name)) {
+    return "photo";
+  }
+  if (mime.startsWith("video/") || /\.(mp4|mov|webm|m4v|avi|mkv)$/.test(name)) {
+    return "video";
+  }
+  return null;
 }
 
 export function isCloudflareStreamEmbed(url: string) {

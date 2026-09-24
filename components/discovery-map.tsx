@@ -44,12 +44,14 @@ export function DiscoveryMap({ places, compact = false, caption }: DiscoveryMapP
 
       const markers = points.map((place) => {
         const live = place.liveCount > 0;
+        const wanted = place.openRequestCount > 0;
+        const color = live ? "#c8102e" : wanted ? "#b56a4c" : "#2f5d62";
         const marker = L.circleMarker([place.latitude, place.longitude], {
           radius: live ? 11 : 9,
-          color: live ? "#c8102e" : "#2f5d62",
+          color,
           weight: live ? 3 : 2,
-          fillColor: live ? "#c8102e" : "#fffcf7",
-          fillOpacity: live ? 0.85 : 1,
+          fillColor: color,
+          fillOpacity: live ? 0.85 : 0.75,
         });
         const name = place.place || place.city;
         const href = place.href || `/place/${place.slug}`;

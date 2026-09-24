@@ -1,13 +1,8 @@
 import type { Metadata } from "next";
-import { Fraunces, Source_Sans_3 } from "next/font/google";
+import { Source_Sans_3 } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { LocalModeBanner } from "@/components/local-mode-banner";
 import "./globals.css";
-
-const display = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-display",
-});
 
 const sans = Source_Sans_3({
   subsets: ["latin"],
@@ -28,10 +23,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${display.variable} ${sans.variable} min-h-screen font-sans antialiased`}>
+      <body className={`${sans.variable} min-h-screen font-sans antialiased`}>
         <LocalModeBanner />
         <SiteHeader />
-        {children}
+        <div className="pb-24 md:pb-0">{children}</div>
       </body>
     </html>
   );

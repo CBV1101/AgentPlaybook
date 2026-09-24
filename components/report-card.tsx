@@ -11,18 +11,8 @@ type ReportCardProps = {
 };
 
 export function ReportCard({ report }: ReportCardProps) {
-  const href = `/reports/${report.id}`;
-  const location = report.locationHref ? (
-    <Link href={report.locationHref} className="hover:underline">
-      {report.location}
-    </Link>
-  ) : report.locationSlug ? (
-    <Link href={`/place/${report.locationSlug}`} className="hover:underline">
-      {report.location}
-    </Link>
-  ) : (
-    <span>{report.location}</span>
-  );
+  const showcase = report.id.startsWith("dev-showcase-");
+  const href = showcase ? report.locationHref || "/browse" : `/reports/${report.id}`;
 
   const indicators = [
     report.mediaKind === "video" ? "Video" : report.mediaKind === "photo" ? "Photos" : null,
@@ -40,7 +30,12 @@ export function ReportCard({ report }: ReportCardProps) {
       {report.thumbnailUrl ? (
         <Link href={href} className="relative block bg-ink" aria-label={report.title}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={report.thumbnailUrl} alt="" className="h-52 w-full object-cover sm:h-56" />
+          <img src={report.thumbnailUrl} alt="" className="aspect-[16/10] h-auto w-full object-cover" />
+          {report.city && report.country ? (
+            <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-ink/80 to-transparent px-3 py-2">
+              <LocationLabel city={report.city} country={report.country} size="overlay" className="text-[0.7rem] sm:text-xs" />
+            </span>
+          ) : null}
           {report.mediaKind === "video" ? (
             <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
               <span className="flex h-11 w-11 items-center justify-center rounded-full bg-ink/75">
@@ -58,17 +53,7 @@ export function ReportCard({ report }: ReportCardProps) {
       ) : null}
 
       <div className="p-4">
-        {report.city && report.country ? (
-          <LocationLabel
-            city={report.city}
-            country={report.country}
-            href={report.locationHref}
-            size="card"
-          />
-        ) : (
-          <p className="fh-place">{location}</p>
-        )}
-        <Link href={href} className="mt-2 block hover:underline">
+        <Link href={href} className="block hover:underline">
           <h3 className="fh-report-title">{report.title}</h3>
         </Link>
         <p className="mt-2 fh-meta">

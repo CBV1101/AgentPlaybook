@@ -2,9 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AuthRequiredLink } from "@/components/auth-required-link";
 import { InterestButton } from "@/components/interest-button";
+import { LiveCard } from "@/components/live-card";
 import { MapPreview } from "@/components/map-preview";
 import { ReportCard } from "@/components/report-card";
 import { ReportContentForm } from "@/components/report-content-form";
+import { buttonClass } from "@/components/ui/button";
+import { EmptyState, Notice, Page, Section } from "@/components/ui/page";
 import { getCurrentUser } from "@/lib/auth";
 import { getCoverageRequestPage } from "@/lib/queries";
 import { currentUserIsAdmin } from "@/lib/require-admin";
@@ -39,26 +42,32 @@ export default async function CoverageRequestPage({ params, searchParams }: Requ
   const reportHref = `/reports/new?requestId=${page.request.id}`;
 
   return (
-    <main className="mx-auto w-full max-w-3xl px-4 py-10">
-      <p className="text-sm uppercase tracking-[0.2em] text-rose-800">Coverage request</p>
+    <Page width="article">
+      <p className="fh-kicker">Coverage request</p>
       {page.removedAt ? (
-        <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-900">
-          This coverage request was removed from public view.
-        </p>
+        <Notice tone="danger">This coverage request was removed from public view.</Notice>
       ) : null}
-      <h1 className="mt-3 font-[family-name:var(--font-display)] text-4xl text-stone-950">
-        {page.request.title}
-      </h1>
+      <h1 className="mt-3 fh-hero">{page.request.title}</h1>
 
-      <p className="mt-4 text-stone-700">
-        <Link href={`/place/${page.location.slug}`} className="underline">
+      <p className="mt-4 fh-body">
+        <Link href={page.location.href} className="underline">
           {page.location.place || page.location.city}
         </Link>
-        <span className="text-stone-500">
+        <span className="text-muted">
           {" "}
           · {page.location.city}, {page.location.country}
         </span>
       </p>
+
+      {page.event ? (
+        <p className="mt-4 border-y border-line py-4 fh-meta">
+          Part of event{" "}
+          <Link href={`/events/${page.event.id}`} className="font-medium text-ink underline">
+            {page.event.title}
+          </Link>
+          . The event is a grouping, not a conclusion about what happened.
+        </p>
+      ) : null}
 
       <div className="mt-6">
         <MapPreview
@@ -70,19 +79,19 @@ export default async function CoverageRequestPage({ params, searchParams }: Requ
 
       {page.request.description ? (
         <section className="mt-8">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-stone-500">Context</h2>
-          <p className="mt-2 whitespace-pre-wrap text-stone-700">{page.request.description}</p>
+          <h2 className="fh-label">Context</h2>
+          <p className="mt-2 whitespace-pre-wrap fh-body">{page.request.description}</p>
         </section>
       ) : null}
 
-      <dl className="mt-8 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-stone-200 bg-white p-4">
-          <dt className="text-xs uppercase tracking-wide text-stone-500">Date requested</dt>
-          <dd className="mt-1 text-stone-900">{formatRequestedDate(page.request.createdAt)}</dd>
+      <dl className="mt-8 grid grid-cols-2 gap-6 border-y border-line py-5">
+        <div>
+          <dt className="fh-label">Date requested</dt>
+          <dd className="mt-1 text-ink">{formatRequestedDate(page.request.createdAt)}</dd>
         </div>
-        <div className="rounded-2xl border border-stone-200 bg-white p-4">
-          <dt className="text-xs uppercase tracking-wide text-stone-500">People interested</dt>
-          <dd className="mt-1 text-stone-900">{page.request.supporterCount}</dd>
+        <div>
+          <dt className="fh-label">People interested</dt>
+          <dd className="mt-1 text-ink">{page.request.supporterCount}</dd>
         </div>
       </dl>
 
@@ -96,18 +105,32 @@ export default async function CoverageRequestPage({ params, searchParams }: Requ
         <AuthRequiredLink
           href={reportHref}
           isAuthenticated={Boolean(user)}
-          className="inline-flex min-h-12 items-center justify-center rounded-full border border-stone-300 px-4 py-2 text-sm font-medium text-stone-800 hover:bg-stone-50"
+          className={buttonClass("secondary")}
         >
-          Report from this location
+          Report on this
+        </AuthRequiredLink>
+        <AuthRequiredLink
+          href={`/live/new?requestId=${page.request.id}`}
+          isAuthenticated={Boolean(user)}
+          className={buttonClass("live")}
+        >
+          Go live
         </AuthRequiredLink>
       </div>
 
-      <section className="mt-12">
-        <h2 className="font-[family-name:var(--font-display)] text-2xl text-stone-900">
-          Firsthand reports
-        </h2>
+      {(page.liveStreams ?? []).length > 0 ? (
+        <Section kicker="Live" title="Live now">
+          <div className="mt-5 grid gap-4">
+            {page.liveStreams.map((stream) => (
+              <LiveCard key={stream.id} stream={stream} />
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      <Section title="Firsthand reports">
         {page.reports.length === 0 ? (
-          <p className="mt-4 text-stone-600">No firsthand reports have answered this request yet.</p>
+          <EmptyState title="No firsthand reports have answered this request yet." />
         ) : (
           <div className="mt-5 grid gap-4">
             {page.reports.map((report) => (
@@ -115,7 +138,7 @@ export default async function CoverageRequestPage({ params, searchParams }: Requ
             ))}
           </div>
         )}
-      </section>
+      </Section>
 
       <ReportContentForm
         contentType="coverage_request"
@@ -125,6 +148,6 @@ export default async function CoverageRequestPage({ params, searchParams }: Requ
         notice={notice}
         error={error}
       />
-    </main>
+    </Page>
   );
 }

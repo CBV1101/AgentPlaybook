@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { ErrorState, Notice } from "@/components/ui/page";
+import { Field, TextInput } from "@/components/ui/field";
 import { signIn, signUp } from "@/lib/auth-actions";
 import { loginPath, signupPath } from "@/lib/paths";
 
@@ -27,63 +30,46 @@ export function AuthForm({ mode, error, next, demoHint }: AuthFormProps) {
   const action = isSignup ? signUp : signIn;
 
   return (
-    <div className="mx-auto w-full max-w-md rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-      <h1 className="font-[family-name:var(--font-display)] text-3xl text-stone-900">
-        {isSignup ? "Create an account" : "Log in"}
-      </h1>
-      <p className="mt-2 text-sm text-stone-600">
+    <div className="mx-auto w-full max-w-md">
+      <h1 className="fh-title">{isSignup ? "Create an account" : "Log in"}</h1>
+      <p className="mt-2 fh-meta">
         {isSignup
           ? "Sign up to request coverage or publish a firsthand report."
           : "Welcome back. Use the email and password for your Firsthand account."}
       </p>
       {demoHint ? (
-        <p className="mt-3 rounded-xl bg-stone-100 px-3 py-2 text-sm text-stone-700">
+        <Notice>
           Local demo account: <span className="font-medium">jordan@firsthand.local</span> /{" "}
           <span className="font-medium">firsthand</span>
-        </p>
+        </Notice>
       ) : null}
-      {error ? (
-        <p className="mt-4 rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-900" role="alert">
-          {messageForError(error)}
-        </p>
-      ) : null}
+      {error ? <ErrorState>{messageForError(error)}</ErrorState> : null}
       <form action={action} className="mt-6 space-y-4">
         {next ? <input type="hidden" name="next" value={next} /> : null}
-        <div>
-          <label htmlFor="email" className="block text-sm font-medium text-stone-700">
-            Email
-          </label>
-          <input
+        <Field label="Email" htmlFor="email">
+          <TextInput
             id="email"
             name="email"
             type="email"
             autoComplete="email"
             required
-            className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 outline-none focus:border-stone-500"
           />
-        </div>
-        <div>
-          <label htmlFor="password" className="block text-sm font-medium text-stone-700">
-            Password
-          </label>
-          <input
+        </Field>
+        <Field label="Password" htmlFor="password">
+          <TextInput
             id="password"
             name="password"
             type="password"
             autoComplete={isSignup ? "new-password" : "current-password"}
             required
             minLength={6}
-            className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 outline-none focus:border-stone-500"
           />
-        </div>
-        <button
-          type="submit"
-          className="w-full rounded-full bg-stone-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-        >
+        </Field>
+        <Button type="submit" className="w-full">
           {isSignup ? "Sign up" : "Log in"}
-        </button>
+        </Button>
       </form>
-      <p className="mt-4 text-sm text-stone-600">
+      <p className="mt-4 fh-meta">
         {isSignup ? (
           <>
             Already have an account?{" "}

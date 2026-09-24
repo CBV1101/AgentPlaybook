@@ -1,12 +1,54 @@
+import { randomUUID } from "node:crypto";
 import { findMatchingLocation, nextLocationSlug, slugForLocation } from "@/lib/data/locations";
-import { one, toCoverageRequest, toLocationSummary, toReport, type ReportJoinRow, type RequestJoinRow } from "@/lib/data/mappers";
+import { one, toCoverageRequest, toLocationSummary, toReport, REPORT_FEED_SELECT, type ReportJoinRow, type RequestJoinRow } from "@/lib/data/mappers";
 import type { StructuredLocation } from "@/lib/location";
-import { storeReportMedia } from "@/lib/media/store";
+import {
+  createCloudflareBasicUpload,
+  createCloudflareTusUpload,
+  getCloudflareStreamVideo,
+  isCloudflareStreamConfigured,
+} from "@/lib/media/cloudflare-stream";
+import { writeLocalMediaFile } from "@/lib/media/local";
+import { pendingMediaUrl, preferTus } from "@/lib/media/status";
+import { removeSupabaseReporterAvatar, uploadSupabaseReporterAvatar } from "@/lib/media/supabase-avatar";
+import { sha256Hex } from "@/lib/media/hash";
+import { uploadProvenanceFields } from "@/lib/media/provenance";
+import { createSupabaseImageUpload, hashSupabaseImageObject } from "@/lib/media/supabase-signed";
+import type { CreateMediaSessionInput, MediaUploadSession } from "@/lib/media/types";
 import { assembleReporterProfilePage } from "@/lib/data/reporter";
 import { aggregateDiscoveryPlaces, type DiscoveryPlace } from "@/lib/data/discovery";
+import {
+  buildGeographyIndex,
+  locationsInCity,
+  locationsInCountry,
+  searchGeographyHits,
+  type CityPageData,
+  type CountryPageData,
+  type GeographySearchHit,
+} from "@/lib/data/geography";
+import {
+  isLicensingInquiryStatus,
+  normalizeInquiryStatus,
+  type LicensingInboxItem,
+  type LicensingInquiryStatus,
+} from "@/lib/licensing";
+import { homepageCoverageWanted } from "@/lib/coverage-wanted";
+import { activeEventSummaries, toEventSummary } from "@/lib/data/events";
+import { findGeoFollowLocation, geoFollowInsertFields, geoFollowSlugBase } from "@/lib/data/geo-follow";
+import { assembleFollowingFeed, type FollowingFeedItem, type GeoFollowTarget } from "@/lib/follows";
+import { citySlug } from "@/lib/geo";
+import { assertEventAttachable } from "@/lib/events";
+import type { EventPageData, EventReporter, EventSummary } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
 import {
+  supabaseListPublicLiveStreams,
+  supabaseLiveLocationIds,
+  supabaseTerminateLiveStream,
+} from "@/lib/data/supabase/live-repository";
+import type { EventRecord, Location, ReportMedia } from "@/lib/database.types";
+import {
   contentPath,
+  LIVE_MODERATION_REASON_IDS,
   MODERATION_REASONS,
   type ModerationContentType,
   type ModerationQueueItem,
@@ -16,6 +58,29 @@ import {
 
 export async function supabaseGetHomeFeed() {
   const supabase = await createClient();
+  const [wanted, { data: reportRows }] = await Promise.all([
+    supabaseListOpenCoverageWanted(),
+    supabase
+      .from("reports")
+      .select(REPORT_FEED_SELECT)
+      .is("removed_at", null)
+      .eq("publish_status", "published")
+      .order("uploaded_at", { ascending: false })
+      .limit(8),
+  ]);
+
+  return {
+    source: "supabase" as const,
+    requests: homepageCoverageWanted(wanted, 8),
+    reports: ((reportRows ?? []) as ReportJoinRow[]).map(toReport),
+    places: await supabaseDiscoveryPlaces(),
+    activeEvents: await supabaseListActiveEvents(),
+    liveStreams: await supabaseListPublicLiveStreams(),
+  };
+}
+
+export async function supabaseListOpenCoverageWanted(currentUserId?: string | null) {
+  const supabase = await createClient();
   const [{ data: requestRows }, { data: reportRows }] = await Promise.all([
     supabase
       .from("coverage_requests")
@@ -23,33 +88,28 @@ export async function supabaseGetHomeFeed() {
       .eq("status", "open")
       .is("removed_at", null)
       .order("created_at", { ascending: false })
-      .limit(50),
-    supabase
-      .from("reports")
-      .select("id, title, description, uploaded_at, captured_at, request_id, location_id, licensing_status, locations(*), profiles(display_name, username), report_media(media_type, media_url, thumbnail_url)")
-      .is("removed_at", null)
-      .order("uploaded_at", { ascending: false })
-      .limit(8),
+      .limit(400),
+    supabase.from("reports").select("request_id").is("removed_at", null).eq("publish_status", "published").not("request_id", "is", null),
   ]);
 
-  const requests = ((requestRows ?? []) as RequestJoinRow[])
-    .map((row) => toCoverageRequest(row))
-    .sort((a, b) => b.supporterCount - a.supporterCount || b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 8);
+  const responseCounts = new Map<string, number>();
+  for (const row of reportRows ?? []) {
+    if (!row.request_id) {
+      continue;
+    }
+    responseCounts.set(row.request_id, (responseCounts.get(row.request_id) ?? 0) + 1);
+  }
 
-  return {
-    source: "supabase" as const,
-    requests,
-    reports: ((reportRows ?? []) as ReportJoinRow[]).map(toReport),
-    places: await supabaseDiscoveryPlaces(),
-  };
+  return ((requestRows ?? []) as RequestJoinRow[]).map((row) =>
+    toCoverageRequest(row, currentUserId, responseCounts.get(row.id) ?? 0),
+  );
 }
 
 export async function supabaseDiscoveryPlaces(): Promise<DiscoveryPlace[]> {
   const supabase = await createClient();
   const [{ data: locations }, { data: reports }, { data: openRequests }] = await Promise.all([
     supabase.from("locations").select("*"),
-    supabase.from("reports").select("location_id").is("removed_at", null),
+    supabase.from("reports").select("location_id").is("removed_at", null).eq("publish_status", "published"),
     supabase.from("coverage_requests").select("location_id").eq("status", "open").is("removed_at", null),
   ]);
 
@@ -58,7 +118,127 @@ export async function supabaseDiscoveryPlaces(): Promise<DiscoveryPlace[]> {
     reports: (reports ?? []).map((item) => ({ locationId: item.location_id })),
     openRequests: [],
     openRequestLocationIds: (openRequests ?? []).map((item) => item.location_id),
+    liveLocationIds: await supabaseLiveLocationIds(),
   });
+}
+
+async function supabaseGeographyIndex() {
+  const supabase = await createClient();
+  const [{ data: locations }, { data: reports }, { data: openRequests }] = await Promise.all([
+    supabase.from("locations").select("*"),
+    supabase.from("reports").select("location_id").is("removed_at", null).eq("publish_status", "published"),
+    supabase.from("coverage_requests").select("location_id").eq("status", "open").is("removed_at", null),
+  ]);
+
+  return {
+    locations: (locations ?? []).map(toLocationSummary),
+    index: buildGeographyIndex({
+      locations: (locations ?? []).map(toLocationSummary),
+      reports: (reports ?? []).map((item) => ({ locationId: item.location_id })),
+      openRequestLocationIds: (openRequests ?? []).map((item) => item.location_id),
+      liveLocationIds: await supabaseLiveLocationIds(),
+    }),
+  };
+}
+
+export async function supabaseSearchGeography(query: string): Promise<GeographySearchHit[]> {
+  const { index } = await supabaseGeographyIndex();
+  return searchGeographyHits(index, query);
+}
+
+export async function supabaseGetBrowseOverview() {
+  const { index } = await supabaseGeographyIndex();
+  return {
+    countries: index.countries,
+    cities: index.cities,
+    places: index.places.filter((place) => place.place).slice(0, 12),
+  };
+}
+
+export async function supabaseGetCountryPage(
+  slug: string,
+  currentUserId?: string | null,
+): Promise<CountryPageData | null> {
+  const { locations, index } = await supabaseGeographyIndex();
+  const country = index.countries.find((item) => item.slug === slug);
+  const matched = locationsInCountry(locations, slug);
+  if (!country || matched.length === 0) {
+    return null;
+  }
+  const locationIds = matched.map((item) => item.id);
+  const [latestReports, mostRequested] = await Promise.all([
+    supabaseReportsForLocations(locationIds, 8),
+    supabaseRequestsForLocations(locationIds, currentUserId),
+  ]);
+  return {
+    country,
+    cities: index.cities.filter((city) => city.countrySlug === slug),
+    latestReports,
+    mostRequested: mostRequested.slice(0, 8),
+    activeEvents: await supabaseListActiveEvents(locationIds),
+    liveStreams: await supabaseListPublicLiveStreams({ locationIds }),
+  };
+}
+
+export async function supabaseGetCityPage(
+  slug: string,
+  currentUserId?: string | null,
+): Promise<CityPageData | null> {
+  const { locations, index } = await supabaseGeographyIndex();
+  const city = index.cities.find((item) => item.slug === slug);
+  const matched = locationsInCity(locations, slug);
+  if (!city || matched.length === 0) {
+    return null;
+  }
+  const locationIds = matched.map((item) => item.id);
+  const [latestReports, openRequests] = await Promise.all([
+    supabaseReportsForLocations(locationIds, 8),
+    supabaseRequestsForLocations(locationIds, currentUserId),
+  ]);
+  const mapPlaces = index.places.filter((place) => citySlug(place.city, place.country) === slug);
+  return {
+    city,
+    places: mapPlaces.filter((place) => place.place),
+    mapPlaces,
+    latestReports,
+    mostRequested: openRequests.slice(0, 8),
+    openRequests,
+    activeEvents: await supabaseListActiveEvents(locationIds),
+    liveStreams: await supabaseListPublicLiveStreams({ locationIds }),
+  };
+}
+
+async function supabaseReportsForLocations(locationIds: string[], limit: number) {
+  if (locationIds.length === 0) {
+    return [];
+  }
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("reports")
+    .select(REPORT_FEED_SELECT)
+    .in("location_id", locationIds)
+    .is("removed_at", null)
+    .eq("publish_status", "published")
+    .order("uploaded_at", { ascending: false })
+    .limit(limit);
+  return ((data ?? []) as ReportJoinRow[]).map(toReport);
+}
+
+async function supabaseRequestsForLocations(locationIds: string[], currentUserId?: string | null) {
+  if (locationIds.length === 0) {
+    return [];
+  }
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("coverage_requests")
+    .select("id, title, description, created_at, status, created_by, location_id, locations(*), request_interests(id, user_id)")
+    .in("location_id", locationIds)
+    .eq("status", "open")
+    .is("removed_at", null)
+    .order("created_at", { ascending: false });
+  return ((data ?? []) as RequestJoinRow[])
+    .map((row) => toCoverageRequest(row, currentUserId))
+    .sort((a, b) => b.supporterCount - a.supporterCount || b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function supabaseSearchLocations(query: string): Promise<DiscoveryPlace[]> {
@@ -91,8 +271,9 @@ export async function supabaseSearchCoverage(query: string, currentUserId?: stri
       .limit(100),
     supabase
       .from("reports")
-      .select("id, title, description, uploaded_at, captured_at, request_id, location_id, licensing_status, locations(*), profiles(display_name, username), report_media(media_type, media_url, thumbnail_url)")
+      .select(REPORT_FEED_SELECT)
       .is("removed_at", null)
+      .eq("publish_status", "published")
       .order("uploaded_at", { ascending: false })
       .limit(100),
   ]);
@@ -121,9 +302,15 @@ export async function supabaseGetLocationBySlug(slug: string) {
   return data ? toLocationSummary(data) : null;
 }
 
+export async function supabaseGetLocationById(id: string) {
+  const supabase = await createClient();
+  const { data } = await supabase.from("locations").select("*").eq("id", id).maybeSingle();
+  return data ? toLocationSummary(data) : null;
+}
+
 export async function supabaseGetPlacePageData(slug: string, currentUserId?: string | null) {
   const location = await supabaseGetLocationBySlug(slug);
-  if (!location) {
+  if (!location?.place) {
     return null;
   }
 
@@ -137,9 +324,10 @@ export async function supabaseGetPlacePageData(slug: string, currentUserId?: str
       .order("created_at", { ascending: false }),
     supabase
       .from("reports")
-      .select("id, title, description, uploaded_at, captured_at, request_id, location_id, licensing_status, locations(*), profiles(display_name, username), report_media(media_type, media_url, thumbnail_url)")
+      .select(REPORT_FEED_SELECT)
       .eq("location_id", location.id)
       .is("removed_at", null)
+      .eq("publish_status", "published")
       .order("uploaded_at", { ascending: false }),
   ]);
 
@@ -158,6 +346,8 @@ export async function supabaseGetPlacePageData(slug: string, currentUserId?: str
     reports,
     reportCount: reports.length,
     openRequestCount: requests.filter((request) => request.status === "open").length,
+    activeEvents: await supabaseListActiveEvents([location.id]),
+    liveStreams: await supabaseListPublicLiveStreams({ locationIds: [location.id] }),
   };
 }
 
@@ -165,7 +355,7 @@ export async function supabaseGetCoverageRequestPage(id: string, currentUserId?:
   const supabase = await createClient();
   const { data: requestRow } = await supabase
     .from("coverage_requests")
-    .select("id, title, description, created_at, status, created_by, location_id, removed_at, locations(*), request_interests(id, user_id)")
+    .select("id, title, description, created_at, status, created_by, location_id, removed_at, event_id, locations(*), request_interests(id, user_id)")
     .eq("id", id)
     .maybeSingle();
 
@@ -181,9 +371,10 @@ export async function supabaseGetCoverageRequestPage(id: string, currentUserId?:
 
   const { data: reportRows } = await supabase
     .from("reports")
-    .select("id, title, description, uploaded_at, captured_at, request_id, location_id, licensing_status, locations(*), profiles(display_name, username), report_media(media_type, media_url, thumbnail_url)")
+    .select(REPORT_FEED_SELECT)
     .eq("request_id", id)
     .is("removed_at", null)
+    .eq("publish_status", "published")
     .order("uploaded_at", { ascending: false });
 
   return {
@@ -196,18 +387,23 @@ export async function supabaseGetCoverageRequestPage(id: string, currentUserId?:
     reports: ((reportRows ?? []) as ReportJoinRow[]).map(toReport),
     interestedUserIds: (request.request_interests ?? []).map((row) => row.user_id),
     currentUserId: currentUserId ?? null,
+    event: await supabaseLinkedEvent(request.event_id),
+    liveStreams: await supabaseListPublicLiveStreams({ requestId: id }),
   };
 }
 
-export async function supabaseGetReportPage(id: string) {
+export async function supabaseGetReportPage(id: string, currentUserId?: string | null) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("reports")
-    .select("*, locations(*), profiles(display_name, username), report_media(*)")
+    .select("*, locations(*), profiles(display_name, username, avatar_url), report_media(*), coverage_requests(title, request_interests(id))")
     .eq("id", id)
     .maybeSingle();
 
   if (!data) {
+    return null;
+  }
+  if (data.publish_status === "draft" && data.created_by !== currentUserId) {
     return null;
   }
 
@@ -232,19 +428,44 @@ export async function supabaseGetReportPage(id: string) {
     report_media: NonNullable<ReportJoinRow["report_media"]>;
   };
 
+  const mapped = toReport(joined);
+  const [{ data: supports }, { count: supportCount }, { data: live }, followingReporter] = await Promise.all([
+    currentUserId
+      ? supabase.from("report_supports").select("id").eq("report_id", id).eq("user_id", currentUserId).maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase.from("report_supports").select("*", { count: "exact", head: true }).eq("report_id", id),
+    supabase.from("live_streams").select("started_at, ended_at").eq("report_id", id).maybeSingle(),
+    currentUserId && currentUserId !== data.created_by
+      ? supabaseIsFollowingReporter(currentUserId, data.created_by)
+      : Promise.resolve(false),
+  ]);
+
   return {
-    report: toReport(joined),
+    report: mapped,
     description: joined.description,
     capturedAt: joined.captured_at,
     uploadedAt: joined.uploaded_at,
     location: toLocationSummary(location),
     requestId: joined.request_id,
-    requestTitle: request?.title ?? null,
-    media: joined.report_media ?? [],
+    requestTitle: request?.title ?? one(joined.coverage_requests)?.title ?? null,
+    media: ((data.report_media ?? []) as ReportMedia[]).filter((item) => {
+      return !item.upload_status || item.upload_status === "ready";
+    }),
     licensingStatus: joined.licensing_status,
     reporterUsername: profile?.username ?? "reporter",
     reporterDisplayName: profile?.display_name ?? "Anonymous reporter",
+    reporterAvatarUrl: profile?.avatar_url ?? null,
+    reporterId: data.created_by,
+    supportCount: supportCount ?? 0,
+    currentUserSupported: Boolean(supports),
+    followingReporter,
+    recordedLive: Boolean(live) || Boolean(mapped.recordedLive),
+    liveStartedAt: live?.started_at ?? null,
+    liveEndedAt: live?.ended_at ?? null,
     removedAt: (joined as { removed_at?: string | null }).removed_at ?? null,
+    publishStatus: data.publish_status,
+    event: await supabaseLinkedEvent((data as { event_id?: string | null }).event_id),
+    sensitiveContent: Boolean((data as { sensitive_content?: boolean }).sensitive_content),
   };
 }
 
@@ -252,7 +473,7 @@ export async function supabaseGetRequestComposeContext(requestId: string) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("coverage_requests")
-    .select("id, title, location_id, removed_at, locations(place, city, country)")
+    .select("id, title, location_id, event_id, removed_at, locations(place, city, country)")
     .eq("id", requestId)
     .maybeSingle();
 
@@ -266,6 +487,7 @@ export async function supabaseGetRequestComposeContext(requestId: string) {
     title: data.title,
     locationId: data.location_id,
     locationLabel: location ? [location.place, location.city, location.country].filter(Boolean).join(", ") : "",
+    eventId: data.event_id,
   };
 }
 
@@ -314,14 +536,17 @@ export async function supabaseCreateCoverageRequest(input: {
   title: string;
   description: string | null;
   location: StructuredLocation;
+  eventId?: string | null;
 }) {
   const locationId = await supabaseFindOrCreateLocation(input.location);
+  const eventId = await supabaseResolveEventId(input.eventId, locationId);
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("coverage_requests")
     .insert({
       created_by: input.userId,
       location_id: locationId,
+      event_id: eventId,
       title: input.title,
       description: input.description,
       status: "open",
@@ -355,6 +580,14 @@ export async function supabaseExpressInterest(requestId: string, userId: string)
   if (error && error.code !== "23505") {
     throw new Error(error.message);
   }
+  if (!error) {
+    try {
+      const { supabaseDispatchHighInterestRequest } = await import("@/lib/data/supabase/notification-repository");
+      await supabaseDispatchHighInterestRequest(requestId);
+    } catch {
+      // Demand notifications must not block supporting a request.
+    }
+  }
 }
 
 export async function supabaseCreateReport(input: {
@@ -365,8 +598,8 @@ export async function supabaseCreateReport(input: {
   requestId: string | null;
   locationId?: string;
   location?: StructuredLocation | null;
-  files: File[];
   licensingStatus: "view_only" | "licensing_available";
+  eventId?: string | null;
 }) {
   let locationId = input.locationId;
   if (!locationId) {
@@ -375,6 +608,7 @@ export async function supabaseCreateReport(input: {
     }
     locationId = await supabaseFindOrCreateLocation(input.location);
   }
+  const eventId = await supabaseResolveEventId(input.eventId, locationId);
 
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -383,39 +617,18 @@ export async function supabaseCreateReport(input: {
       created_by: input.userId,
       request_id: input.requestId,
       location_id: locationId,
+      event_id: eventId,
       title: input.title,
       description: input.description,
       captured_at: input.capturedAt,
       licensing_status: input.licensingStatus,
+      publish_status: "draft",
     })
     .select("id")
     .single();
 
   if (error || !data) {
-    throw new Error(error?.message || "Could not publish the report.");
-  }
-
-  const stored = await storeReportMedia(input.files, {
-    userId: input.userId,
-    reportId: data.id,
-    licensingStatus: input.licensingStatus,
-  });
-
-  if (stored.length > 0) {
-    const { error: mediaError } = await supabase.from("report_media").insert(
-      stored.map((item) => ({
-        report_id: data.id,
-        media_type: item.mediaType,
-        media_url: item.mediaUrl,
-        thumbnail_url: item.thumbnailUrl,
-        original_filename: item.originalFilename,
-        captured_at: input.capturedAt,
-        licensing_status: input.licensingStatus,
-      })),
-    );
-    if (mediaError) {
-      throw new Error(mediaError.message);
-    }
+    throw new Error(error?.message || "Could not create the report draft.");
   }
 
   const { data: location } = await supabase
@@ -425,6 +638,268 @@ export async function supabaseCreateReport(input: {
     .maybeSingle();
 
   return { id: data.id, locationSlug: location?.slug ?? null };
+}
+
+async function supabaseOwnedReport(reportId: string, userId: string) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("reports")
+    .select("id, created_by, removed_at, licensing_status, captured_at, publish_status")
+    .eq("id", reportId)
+    .maybeSingle();
+  if (!data || data.removed_at) {
+    throw new Error("That report was not found.");
+  }
+  if (data.created_by !== userId) {
+    throw new Error("You can only add media to your own report.");
+  }
+  return data;
+}
+
+async function supabaseOwnedMedia(mediaId: string, userId: string) {
+  const supabase = await createClient();
+  const { data: media } = await supabase.from("report_media").select("*").eq("id", mediaId).maybeSingle();
+  if (!media) {
+    throw new Error("That media was not found.");
+  }
+  await supabaseOwnedReport(media.report_id, userId);
+  return media;
+}
+
+export async function supabaseCreateMediaSession(input: CreateMediaSessionInput): Promise<MediaUploadSession> {
+  const report = await supabaseOwnedReport(input.reportId, input.userId);
+  const supabase = await createClient();
+  const provenance = uploadProvenanceFields(input.originalSha256);
+
+  if (input.mediaType === "video" && isCloudflareStreamConfigured()) {
+    const created = preferTus(input.fileSize)
+      ? await createCloudflareTusUpload({
+          filename: input.filename,
+          fileSize: input.fileSize,
+          contentType: input.contentType,
+          creatorId: input.userId,
+          reportId: input.reportId,
+        })
+      : await createCloudflareBasicUpload({
+          filename: input.filename,
+          creatorId: input.userId,
+          reportId: input.reportId,
+        });
+    const { data, error } = await supabase
+      .from("report_media")
+      .insert({
+        report_id: report.id,
+        media_type: "video",
+        media_url: pendingMediaUrl("video", created.uid),
+        thumbnail_url: null,
+        original_filename: input.filename,
+        captured_at: input.capturedAt || report.captured_at,
+        licensing_status: input.licensingStatus,
+        provider: "cloudflare-stream",
+        provider_asset_id: created.uid,
+        upload_status: "pending",
+        ...provenance,
+      })
+      .select("id")
+      .single();
+    if (error || !data) {
+      throw new Error(error?.message || "Could not start the video upload.");
+    }
+    return {
+      mediaId: data.id,
+      protocol: preferTus(input.fileSize) ? "tus" : "basic",
+      uploadUrl: created.uploadUrl,
+      provider: "cloudflare-stream",
+      providerAssetId: created.uid,
+      contentType: input.contentType,
+    };
+  }
+
+  if (input.mediaType === "photo" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    try {
+      const signed = await createSupabaseImageUpload({
+        userId: input.userId,
+        reportId: input.reportId,
+        filename: input.filename,
+        contentType: input.contentType,
+      });
+      const { data, error } = await supabase
+        .from("report_media")
+        .insert({
+          report_id: report.id,
+          media_type: "photo",
+          media_url: signed.publicUrl,
+          thumbnail_url: signed.publicUrl,
+          original_filename: input.filename,
+          captured_at: input.capturedAt || report.captured_at,
+          licensing_status: input.licensingStatus,
+          provider: "supabase-storage",
+          provider_asset_id: signed.path,
+          upload_status: "pending",
+          ...provenance,
+        })
+        .select("id")
+        .single();
+      if (!error && data) {
+        return {
+          mediaId: data.id,
+          protocol: "supabase" as const,
+          uploadUrl: signed.signedUrl,
+          token: signed.token,
+          path: signed.path,
+          publicUrl: signed.publicUrl,
+          provider: "supabase-storage" as const,
+          providerAssetId: signed.path,
+          contentType: signed.contentType,
+        };
+      }
+    } catch {
+      // Fall through to the local upload path if Storage is unavailable.
+    }
+  }
+
+  const assetId = randomUUID();
+  const { data, error } = await supabase
+    .from("report_media")
+    .insert({
+      report_id: report.id,
+      media_type: input.mediaType,
+      media_url: pendingMediaUrl(input.mediaType, assetId),
+      thumbnail_url: null,
+      original_filename: input.filename,
+      captured_at: input.capturedAt || report.captured_at,
+      licensing_status: input.licensingStatus,
+      provider: "local",
+      provider_asset_id: assetId,
+      upload_status: "pending",
+      ...provenance,
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message || "Could not start the media upload.");
+  }
+  return {
+    mediaId: data.id,
+    protocol: "local",
+    uploadUrl: "/api/media/local-upload",
+    provider: "local",
+    providerAssetId: assetId,
+    contentType: input.contentType,
+  };
+}
+
+export async function supabaseCompleteLocalMedia(input: {
+  userId: string;
+  mediaId: string;
+  filename: string;
+  bytes: Uint8Array;
+}) {
+  const media = await supabaseOwnedMedia(input.mediaId, input.userId);
+  const stored = await writeLocalMediaFile({
+    bytes: input.bytes,
+    filename: input.filename,
+    mediaType: media.media_type,
+  });
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("report_media")
+    .update({
+      media_url: stored.mediaUrl,
+      thumbnail_url: stored.thumbnailUrl,
+      upload_status: "ready",
+      uploaded_at: new Date().toISOString(),
+      original_filename: input.filename,
+      original_sha256: sha256Hex(input.bytes),
+    })
+    .eq("id", input.mediaId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return { reportId: media.report_id, mediaId: input.mediaId };
+}
+
+export async function supabaseRefreshVideoStatus(userId: string, mediaId: string) {
+  const media = await supabaseOwnedMedia(mediaId, userId);
+  if (media.provider !== "cloudflare-stream" || !media.provider_asset_id) {
+    return { uploadStatus: media.upload_status, mediaUrl: media.media_url, thumbnailUrl: media.thumbnail_url };
+  }
+  const status = await getCloudflareStreamVideo(media.provider_asset_id);
+  const uploadStatus = status.failed ? "failed" : status.ready ? "ready" : "processing";
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("report_media")
+    .update({
+      upload_status: uploadStatus,
+      media_url: status.mediaUrl,
+      thumbnail_url: status.thumbnailUrl,
+    })
+    .eq("id", mediaId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  return { uploadStatus, mediaUrl: status.mediaUrl, thumbnailUrl: status.thumbnailUrl };
+}
+
+export async function supabaseMarkMediaStatus(
+  userId: string,
+  mediaId: string,
+  status: "uploading" | "processing" | "failed",
+) {
+  await supabaseOwnedMedia(mediaId, userId);
+  const supabase = await createClient();
+  const { error } = await supabase.from("report_media").update({ upload_status: status }).eq("id", mediaId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabaseCompleteImageMedia(userId: string, mediaId: string, publicUrl: string) {
+  const media = await supabaseOwnedMedia(mediaId, userId);
+  const storedHash =
+    media.provider === "supabase-storage" && media.provider_asset_id
+      ? await hashSupabaseImageObject(media.provider_asset_id)
+      : null;
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("report_media")
+    .update({
+      media_url: publicUrl,
+      thumbnail_url: publicUrl,
+      upload_status: "ready",
+      uploaded_at: new Date().toISOString(),
+      original_sha256: storedHash ?? media.original_sha256,
+    })
+    .eq("id", mediaId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabasePublishReport(userId: string, reportId: string) {
+  const report = await supabaseOwnedReport(reportId, userId);
+  const supabase = await createClient();
+  const { data: media, error } = await supabase.from("report_media").select("upload_status").eq("report_id", report.id);
+  if (error) {
+    throw new Error(error.message);
+  }
+  if (!media?.length || media.some((item) => item.upload_status !== "ready")) {
+    throw new Error("Wait until every photo and video is ready before publishing.");
+  }
+  const { error: updateError } = await supabase
+    .from("reports")
+    .update({ publish_status: "published", uploaded_at: new Date().toISOString() })
+    .eq("id", report.id);
+  if (updateError) {
+    throw new Error(updateError.message);
+  }
+  try {
+    const { supabaseDispatchPublishedReport } = await import("@/lib/data/supabase/notification-repository");
+    await supabaseDispatchPublishedReport(report.id);
+  } catch {
+    // Publishing still succeeds if the inbox write fails.
+  }
+  return report.id;
 }
 
 export async function supabaseGetProfilePage(username: string) {
@@ -446,9 +921,10 @@ async function supabaseAssembleProfile(profile: NonNullable<Awaited<ReturnType<t
   const supabase = await createClient();
   const { data: reportRows } = await supabase
     .from("reports")
-    .select("id, title, description, uploaded_at, captured_at, request_id, location_id, licensing_status, locations(*), profiles(display_name, username), report_media(media_type, media_url, thumbnail_url)")
+    .select(REPORT_FEED_SELECT)
     .eq("created_by", profile.id)
     .is("removed_at", null)
+    .eq("publish_status", "published")
     .order("uploaded_at", { ascending: false });
 
   const rows = (reportRows ?? []) as ReportJoinRow[];
@@ -461,7 +937,12 @@ async function supabaseAssembleProfile(profile: NonNullable<Awaited<ReturnType<t
   );
 
   const extras = await loadReputationCounts(profile.id, reports.map((item) => item.id));
-  return assembleReporterProfilePage(profile, reports, locationsById, extras);
+  const streams = await supabaseListPublicLiveStreams({ reporterId: profile.id, includeEnded: true });
+  return assembleReporterProfilePage(profile, reports, locationsById, {
+    ...extras,
+    liveNow: streams.filter((item) => item.status === "live"),
+    pastLive: streams.filter((item) => item.status === "ended"),
+  });
 }
 
 async function loadReputationCounts(profileId: string, reportIds: string[]) {
@@ -501,7 +982,7 @@ function toSupabaseQueueItem(
   item: {
     id: string;
     submitted_by: string;
-    content_type: "firsthand_report" | "coverage_request";
+    content_type: ModerationContentType;
     content_id: string;
     reason: ModerationReason;
     details: string | null;
@@ -510,8 +991,22 @@ function toSupabaseQueueItem(
   },
   titles: Map<string, { title: string; removed: boolean }>,
   usernames: Map<string, string>,
+  liveById: Map<
+    string,
+    {
+      reporterId: string;
+      reporterName: string;
+      reporterUsername: string;
+      reporterCanLiveStream: boolean;
+      locationLabel: string;
+      eventTitle: string | null;
+      streamStatus: string;
+    }
+  >,
+  reportCounts: Map<string, number>,
 ): ModerationQueueItem {
   const content = titles.get(`${item.content_type}:${item.content_id}`);
+  const live = item.content_type === "live_stream" ? liveById.get(item.content_id) : undefined;
   return {
     id: item.id,
     submittedBy: item.submitted_by,
@@ -525,6 +1020,12 @@ function toSupabaseQueueItem(
     details: item.details,
     createdAt: item.created_at,
     status: item.status,
+    liveStream: live
+      ? {
+          ...live,
+          reportCount: reportCounts.get(`${item.content_type}:${item.content_id}`) ?? 0,
+        }
+      : undefined,
   };
 }
 
@@ -539,12 +1040,25 @@ export async function supabaseSubmitModerationReport(input: {
   if (!reason) {
     throw new Error("reason");
   }
+  if (
+    input.contentType === "live_stream" &&
+    !(LIVE_MODERATION_REASON_IDS as readonly string[]).includes(reason)
+  ) {
+    throw new Error("reason");
+  }
 
   const supabase = await createClient();
-  const table = input.contentType === "coverage_request" ? "coverage_requests" : "reports";
-  const { data: content } = await supabase.from(table).select("id").eq("id", input.contentId).maybeSingle();
-  if (!content) {
-    throw new Error("content");
+  if (input.contentType === "live_stream") {
+    const { data: content } = await supabase.from("live_streams").select("id").eq("id", input.contentId).maybeSingle();
+    if (!content) {
+      throw new Error("content");
+    }
+  } else {
+    const table = input.contentType === "coverage_request" ? "coverage_requests" : "reports";
+    const { data: content } = await supabase.from(table).select("id").eq("id", input.contentId).maybeSingle();
+    if (!content) {
+      throw new Error("content");
+    }
   }
 
   const { error } = await supabase.from("moderation_reports").insert({
@@ -572,15 +1086,31 @@ export async function supabaseListModerationReports(): Promise<ModerationQueueIt
   const rows = data ?? [];
   const reportIds = rows.filter((row) => row.content_type === "firsthand_report").map((row) => row.content_id);
   const requestIds = rows.filter((row) => row.content_type === "coverage_request").map((row) => row.content_id);
+  const liveIds = rows.filter((row) => row.content_type === "live_stream").map((row) => row.content_id);
   const submitterIds = [...new Set(rows.map((row) => row.submitted_by))];
 
-  const [{ data: reports }, { data: requests }, { data: profiles }] = await Promise.all([
+  const [{ data: reports }, { data: requests }, { data: lives }, { data: profiles }] = await Promise.all([
     reportIds.length
       ? supabase.from("reports").select("id, title, removed_at").in("id", reportIds)
       : Promise.resolve({ data: [] as Array<{ id: string; title: string; removed_at: string | null }> }),
     requestIds.length
       ? supabase.from("coverage_requests").select("id, title, removed_at").in("id", requestIds)
       : Promise.resolve({ data: [] as Array<{ id: string; title: string; removed_at: string | null }> }),
+    liveIds.length
+      ? supabase
+          .from("live_streams")
+          .select("id, title, status, reporter_id, location_id, event_id")
+          .in("id", liveIds)
+      : Promise.resolve({
+          data: [] as Array<{
+            id: string;
+            title: string;
+            status: string;
+            reporter_id: string;
+            location_id: string;
+            event_id: string | null;
+          }>,
+        }),
     submitterIds.length
       ? supabase.from("profiles").select("id, username").in("id", submitterIds)
       : Promise.resolve({ data: [] as Array<{ id: string; username: string }> }),
@@ -593,9 +1123,66 @@ export async function supabaseListModerationReports(): Promise<ModerationQueueIt
   for (const row of requests ?? []) {
     titles.set(`coverage_request:${row.id}`, { title: row.title, removed: Boolean(row.removed_at) });
   }
+  for (const row of lives ?? []) {
+    titles.set(`live_stream:${row.id}`, {
+      title: row.title,
+      removed: row.status === "terminated" || row.status === "failed",
+    });
+  }
   const usernames = new Map((profiles ?? []).map((row) => [row.id, row.username]));
+  const liveRows = lives ?? [];
+  const liveReporterIds = [...new Set(liveRows.map((row) => row.reporter_id))];
+  const liveLocationIds = [...new Set(liveRows.map((row) => row.location_id))];
+  const liveEventIds = [...new Set(liveRows.flatMap((row) => (row.event_id ? [row.event_id] : [])))];
+  const [{ data: liveReporters }, { data: liveLocations }, { data: liveEvents }] = await Promise.all([
+    liveReporterIds.length
+      ? supabase.from("profiles").select("id, display_name, username, can_live_stream").in("id", liveReporterIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; display_name: string; username: string; can_live_stream: boolean }> }),
+    liveLocationIds.length
+      ? supabase.from("locations").select("*").in("id", liveLocationIds)
+      : Promise.resolve({ data: [] as Location[] }),
+    liveEventIds.length
+      ? supabase.from("events").select("id, title").in("id", liveEventIds)
+      : Promise.resolve({ data: [] as Array<{ id: string; title: string }> }),
+  ]);
+  const liveReporterById = new Map((liveReporters ?? []).map((item) => [item.id, item]));
+  const liveLocationById = new Map((liveLocations ?? []).map((item) => [item.id, item]));
+  const liveEventById = new Map((liveEvents ?? []).map((item) => [item.id, item.title]));
+  const liveById = new Map<
+    string,
+    {
+      reporterId: string;
+      reporterName: string;
+      reporterUsername: string;
+      reporterCanLiveStream: boolean;
+      locationLabel: string;
+      eventTitle: string | null;
+      streamStatus: string;
+    }
+  >();
+  for (const row of liveRows) {
+    const reporter = liveReporterById.get(row.reporter_id);
+    const location = liveLocationById.get(row.location_id);
+    if (!reporter || !location) {
+      continue;
+    }
+    liveById.set(row.id, {
+      reporterId: reporter.id,
+      reporterName: reporter.display_name,
+      reporterUsername: reporter.username,
+      reporterCanLiveStream: reporter.can_live_stream !== false,
+      locationLabel: toLocationSummary(location).label,
+      eventTitle: row.event_id ? liveEventById.get(row.event_id) ?? null : null,
+      streamStatus: row.status,
+    });
+  }
+  const reportCounts = new Map<string, number>();
+  for (const row of rows) {
+    const key = `${row.content_type}:${row.content_id}`;
+    reportCounts.set(key, (reportCounts.get(key) ?? 0) + 1);
+  }
 
-  return rows.map((row) => toSupabaseQueueItem(row, titles, usernames));
+  return rows.map((row) => toSupabaseQueueItem(row, titles, usernames, liveById, reportCounts));
 }
 
 export async function supabaseUpdateModerationStatus(id: string, status: ModerationStatus) {
@@ -627,6 +1214,8 @@ export async function supabaseRemoveReportedContent(id: string) {
     if (updateError) {
       throw new Error(updateError.message);
     }
+  } else if (item.content_type === "live_stream") {
+    await supabaseTerminateLiveStream(item.content_id);
   } else {
     const { error: updateError } = await supabase
       .from("reports")
@@ -647,4 +1236,606 @@ export async function supabaseRemoveReportedContent(id: string) {
   if (statusError) {
     throw new Error(statusError.message);
   }
+}
+
+function isUniqueViolation(error: { code?: string } | null) {
+  return error?.code === "23505";
+}
+
+export async function supabaseIsFollowingReporter(followerId: string, reporterId: string) {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("profile_follows")
+    .select("id")
+    .eq("follower_id", followerId)
+    .eq("following_id", reporterId)
+    .maybeSingle();
+  return Boolean(data);
+}
+
+export async function supabaseFollowReporter(followerId: string, reporterId: string) {
+  if (followerId === reporterId) {
+    throw new Error("You cannot follow yourself.");
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.from("profile_follows").insert({
+    follower_id: followerId,
+    following_id: reporterId,
+  });
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabaseUnfollowReporter(followerId: string, reporterId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("profile_follows")
+    .delete()
+    .eq("follower_id", followerId)
+    .eq("following_id", reporterId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+async function supabaseResolveGeoFollowLocationId(target: GeoFollowTarget, createIfMissing: boolean) {
+  const supabase = await createClient();
+  if (target.kind === "place") {
+    return target.locationId ?? null;
+  }
+
+  const { data: existing } = await supabase.from("locations").select("*").eq("country", target.country);
+  const match = findGeoFollowLocation(existing ?? [], target);
+  if (match) {
+    return match.id;
+  }
+  if (!createIfMissing) {
+    return null;
+  }
+
+  const { data: allSlugs } = await supabase.from("locations").select("slug");
+  const taken = new Set((allSlugs ?? []).map((row) => row.slug));
+  const slug = nextLocationSlug(geoFollowSlugBase(target), taken);
+  const fields = geoFollowInsertFields(target, slug);
+  const { data, error } = await supabase.from("locations").insert(fields).select("id").single();
+  if (error || !data) {
+    throw new Error(error?.message || "Could not save this location.");
+  }
+  return data.id;
+}
+
+export async function supabaseIsFollowingLocation(userId: string, target: GeoFollowTarget) {
+  const locationId = await supabaseResolveGeoFollowLocationId(target, false);
+  if (!locationId) {
+    return false;
+  }
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("location_follows")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("location_id", locationId)
+    .maybeSingle();
+  return Boolean(data);
+}
+
+export async function supabaseFollowLocation(userId: string, target: GeoFollowTarget) {
+  const locationId = await supabaseResolveGeoFollowLocationId(target, true);
+  if (!locationId) {
+    throw new Error("That location was not found.");
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.from("location_follows").insert({
+    user_id: userId,
+    location_id: locationId,
+  });
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabaseUnfollowLocation(userId: string, target: GeoFollowTarget) {
+  const locationId = await supabaseResolveGeoFollowLocationId(target, false);
+  if (!locationId) {
+    return;
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("location_follows")
+    .delete()
+    .eq("user_id", userId)
+    .eq("location_id", locationId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabaseGetFollowingFeed(userId: string): Promise<FollowingFeedItem[]> {
+  const supabase = await createClient();
+  const [{ data: reporterFollows }, { data: locationFollowRows }, { data: reportRows }, { data: requestRows }] =
+    await Promise.all([
+      supabase.from("profile_follows").select("following_id").eq("follower_id", userId),
+      supabase.from("location_follows").select("location_id").eq("user_id", userId),
+      supabase
+        .from("reports")
+        .select(
+          `${REPORT_FEED_SELECT}, created_by`,
+        )
+        .is("removed_at", null)
+        .eq("publish_status", "published")
+        .order("uploaded_at", { ascending: false })
+        .limit(200),
+      supabase
+        .from("coverage_requests")
+        .select("id, title, description, created_at, status, created_by, location_id, locations(*), request_interests(id, user_id)")
+        .is("removed_at", null)
+        .order("created_at", { ascending: false })
+        .limit(200),
+    ]);
+
+  const followLocationIds = [...new Set((locationFollowRows ?? []).map((item) => item.location_id))];
+  const { data: followedLocationRows } = followLocationIds.length
+    ? await supabase.from("locations").select("*").in("id", followLocationIds)
+    : { data: [] };
+
+  const followedReporterIds = new Set((reporterFollows ?? []).map((item) => item.following_id));
+  const followedLocations = (followedLocationRows ?? []).map(toLocationSummary);
+
+  const reports = ((reportRows ?? []) as Array<ReportJoinRow & { created_by: string }>).flatMap((row) => {
+    const location = one(row.locations);
+    if (!location) {
+      return [];
+    }
+    return [
+      {
+        report: toReport(row),
+        createdBy: row.created_by,
+        location: toLocationSummary(location),
+      },
+    ];
+  });
+
+  const requests = ((requestRows ?? []) as RequestJoinRow[]).flatMap((row) => {
+    const location = one(row.locations);
+    if (!location) {
+      return [];
+    }
+    return [
+      {
+        request: toCoverageRequest(row, userId),
+        location: toLocationSummary(location),
+      },
+    ];
+  });
+
+  return assembleFollowingFeed({
+    followedReporterIds,
+    followedLocations,
+    reports,
+    requests,
+  });
+}
+
+export async function supabaseGetFollowGraph(userId: string) {
+  const supabase = await createClient();
+  const [{ data: reporterFollows }, { data: locationFollowRows }] = await Promise.all([
+    supabase.from("profile_follows").select("following_id").eq("follower_id", userId),
+    supabase.from("location_follows").select("location_id").eq("user_id", userId),
+  ]);
+  const followLocationIds = [...new Set((locationFollowRows ?? []).map((item) => item.location_id))];
+  const { data: followedLocationRows } = followLocationIds.length
+    ? await supabase.from("locations").select("*").in("id", followLocationIds)
+    : { data: [] };
+  return {
+    reporterIds: (reporterFollows ?? []).map((item) => item.following_id),
+    locations: (followedLocationRows ?? []).map(toLocationSummary),
+  };
+}
+
+export async function supabaseSupportReport(reportId: string, userId: string) {
+  const supabase = await createClient();
+  const { data: report } = await supabase
+    .from("reports")
+    .select("id, created_by, removed_at, publish_status")
+    .eq("id", reportId)
+    .maybeSingle();
+  if (!report || report.removed_at || report.publish_status !== "published") {
+    throw new Error("That report was not found.");
+  }
+  if (report.created_by === userId) {
+    throw new Error("You cannot support your own reporting.");
+  }
+  const { error } = await supabase.from("report_supports").insert({
+    report_id: reportId,
+    user_id: userId,
+  });
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabaseRemoveReportSupport(reportId: string, userId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("report_supports").delete().eq("report_id", reportId).eq("user_id", userId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabaseCreateLicensingInquiry(input: {
+  userId: string;
+  reportId: string;
+  mediaId: string | null;
+  organizationName: string;
+  contactEmail: string;
+  intendedUse: string;
+  message: string;
+}) {
+  const supabase = await createClient();
+  const { data: report } = await supabase
+    .from("reports")
+    .select("id, created_by, licensing_status, removed_at, publish_status")
+    .eq("id", input.reportId)
+    .maybeSingle();
+  if (
+    !report ||
+    report.removed_at ||
+    report.publish_status !== "published" ||
+    report.licensing_status !== "licensing_available"
+  ) {
+    throw new Error("This report is not available for licensing.");
+  }
+  if (report.created_by === input.userId) {
+    throw new Error("You cannot inquire about licensing your own media.");
+  }
+  if (input.mediaId) {
+    const { data: media } = await supabase
+      .from("report_media")
+      .select("id")
+      .eq("id", input.mediaId)
+      .eq("report_id", report.id)
+      .maybeSingle();
+    if (!media) {
+      throw new Error("That media is not part of this report.");
+    }
+  }
+  const { data, error } = await supabase
+    .from("licensing_transactions")
+    .insert({
+      report_id: input.reportId,
+      report_media_id: input.mediaId,
+      licensee_profile_id: input.userId,
+      reporter_id: report.created_by,
+      organization_name: input.organizationName,
+      contact_email: input.contactEmail,
+      intended_use: input.intendedUse,
+      message: input.message,
+      status: "inquiry",
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message || "Could not submit this licensing inquiry.");
+  }
+  try {
+    const { supabaseDispatchLicensingInquiry } = await import("@/lib/data/supabase/notification-repository");
+    await supabaseDispatchLicensingInquiry({
+      actorId: input.userId,
+      reporterId: report.created_by,
+      reportId: input.reportId,
+      organizationName: input.organizationName,
+    });
+  } catch {
+    // Inquiry is stored even if the inbox write fails.
+  }
+  return data.id;
+}
+
+export async function supabaseListLicensingInbox(userId: string): Promise<LicensingInboxItem[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("licensing_transactions")
+    .select("*")
+    .eq("reporter_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    throw new Error(error.message);
+  }
+  const rows = data ?? [];
+  const reportIds = [...new Set(rows.map((row) => row.report_id))];
+  const mediaIds = [...new Set(rows.map((row) => row.report_media_id).filter((id): id is string => Boolean(id)))];
+  const licenseeIds = [...new Set(rows.map((row) => row.licensee_profile_id).filter((id): id is string => Boolean(id)))];
+
+  const [{ data: reports }, { data: media }, { data: profiles }] = await Promise.all([
+    reportIds.length ? supabase.from("reports").select("id, title").in("id", reportIds) : Promise.resolve({ data: [] }),
+    mediaIds.length
+      ? supabase.from("report_media").select("id, media_type, original_filename").in("id", mediaIds)
+      : Promise.resolve({ data: [] }),
+    licenseeIds.length
+      ? supabase.from("profiles").select("id, display_name").in("id", licenseeIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const reportTitles = new Map((reports ?? []).map((row) => [row.id, row.title]));
+  const mediaById = new Map((media ?? []).map((row) => [row.id, row]));
+  const names = new Map((profiles ?? []).map((row) => [row.id, row.display_name]));
+
+  return rows.map((item) => {
+    const mediaRow = item.report_media_id ? mediaById.get(item.report_media_id) : undefined;
+    return {
+      id: item.id,
+      createdAt: item.created_at,
+      status: normalizeInquiryStatus(item.status),
+      organizationName: item.organization_name ?? names.get(item.licensee_profile_id ?? "") ?? "Unknown requester",
+      contactEmail: item.contact_email ?? "",
+      intendedUse: item.intended_use ?? "",
+      message: item.message ?? "",
+      reportId: item.report_id,
+      reportTitle: reportTitles.get(item.report_id) ?? "Unknown report",
+      mediaId: item.report_media_id,
+      mediaLabel: mediaRow?.original_filename || (mediaRow?.media_type === "video" ? "Video" : mediaRow ? "Photo" : "Whole report"),
+      requesterName: names.get(item.licensee_profile_id ?? "") ?? item.organization_name ?? "Requester",
+    };
+  });
+}
+
+export async function supabaseUpdateLicensingInquiryStatus(
+  userId: string,
+  inquiryId: string,
+  status: LicensingInquiryStatus,
+) {
+  if (!isLicensingInquiryStatus(status)) {
+    throw new Error("That status is not available.");
+  }
+  const supabase = await createClient();
+  const { data: inquiry } = await supabase
+    .from("licensing_transactions")
+    .select("id, reporter_id")
+    .eq("id", inquiryId)
+    .maybeSingle();
+  if (!inquiry || inquiry.reporter_id !== userId) {
+    throw new Error("Only the creator can update this inquiry.");
+  }
+  const { error } = await supabase.from("licensing_transactions").update({ status }).eq("id", inquiryId);
+  if (error) {
+    throw new Error(error.message);
+  }
+  try {
+    const { supabaseDispatchLicensingStatusChange } = await import("@/lib/data/supabase/notification-repository");
+    await supabaseDispatchLicensingStatusChange({ actorId: userId, inquiryId, status });
+  } catch {
+    // Status is stored even if the inbox write fails.
+  }
+}
+
+async function supabaseLinkedEvent(eventId: string | null | undefined) {
+  if (!eventId) {
+    return null;
+  }
+  const supabase = await createClient();
+  const { data } = await supabase.from("events").select("id, title").eq("id", eventId).maybeSingle();
+  return data ? { id: data.id, title: data.title } : null;
+}
+
+async function supabaseResolveEventId(eventId: string | null | undefined, locationId: string) {
+  if (!eventId) {
+    return null;
+  }
+  const supabase = await createClient();
+  const { data } = await supabase.from("events").select("*").eq("id", eventId).maybeSingle();
+  assertEventAttachable((data as EventRecord | null) ?? null, locationId);
+  return eventId;
+}
+
+export async function supabaseListActiveEvents(locationIds?: string[]): Promise<EventSummary[]> {
+  const supabase = await createClient();
+  let query = supabase.from("events").select("*, locations(*)").eq("status", "active").order("started_at", { ascending: false });
+  if (locationIds && locationIds.length > 0) {
+    query = query.in("location_id", locationIds);
+  } else if (locationIds && locationIds.length === 0) {
+    return [];
+  }
+  const { data: eventRows } = await query;
+  const events = (eventRows ?? []) as Array<EventRecord & { locations: Location | Location[] | null }>;
+  if (events.length === 0) {
+    return [];
+  }
+  const eventIds = events.map((item) => item.id);
+  const [{ data: reports }, { data: requests }] = await Promise.all([
+    supabase.from("reports").select("id, event_id, created_by, removed_at").in("event_id", eventIds).is("removed_at", null).eq("publish_status", "published"),
+    supabase.from("coverage_requests").select("id, event_id, status, removed_at").in("event_id", eventIds).is("removed_at", null),
+  ]);
+  const locations = events.flatMap((item) => {
+    const location = one(item.locations);
+    return location ? [location as Location] : [];
+  });
+  return activeEventSummaries(events, locations, reports ?? [], requests ?? []);
+}
+
+export async function supabaseListActiveEventsAtLocation(location: StructuredLocation): Promise<EventSummary[]> {
+  const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("locations")
+    .select("*")
+    .eq("city", location.city)
+    .eq("country", location.country);
+  const match = findMatchingLocation(existing ?? [], location);
+  if (!match) {
+    return [];
+  }
+  return supabaseListActiveEvents([match.id]);
+}
+
+export async function supabaseGetEventPage(id: string, currentUserId?: string | null): Promise<EventPageData | null> {
+  const supabase = await createClient();
+  const { data } = await supabase.from("events").select("*, locations(*)").eq("id", id).maybeSingle();
+  if (!data) {
+    return null;
+  }
+  const event = data as EventRecord & { locations: Location | Location[] | null };
+  const location = one(event.locations) as Location | null;
+  if (!location) {
+    return null;
+  }
+
+  const [{ data: reportRows }, { data: requestRows }] = await Promise.all([
+    supabase
+      .from("reports")
+      .select(`${REPORT_FEED_SELECT}, created_by, event_id`)
+      .eq("event_id", id)
+      .is("removed_at", null)
+      .eq("publish_status", "published")
+      .order("uploaded_at", { ascending: false }),
+    supabase
+      .from("coverage_requests")
+      .select("id, title, description, created_at, status, created_by, location_id, event_id, locations(*), request_interests(id, user_id)")
+      .eq("event_id", id)
+      .is("removed_at", null)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  const reports = ((reportRows ?? []) as ReportJoinRow[]).map(toReport);
+  const requests = ((requestRows ?? []) as RequestJoinRow[]).map((row) => toCoverageRequest(row, currentUserId));
+  const reporterMap = new Map<string, EventReporter>();
+  for (const row of reportRows ?? []) {
+    const profile = one((row as { profiles?: { username: string; display_name: string; avatar_url: string | null } | { username: string; display_name: string; avatar_url: string | null }[] | null }).profiles);
+    const createdBy = (row as { created_by?: string }).created_by;
+    if (!profile || !createdBy || reporterMap.has(createdBy)) {
+      continue;
+    }
+    reporterMap.set(createdBy, {
+      id: createdBy,
+      username: profile.username,
+      displayName: profile.display_name,
+      avatarUrl: profile.avatar_url,
+    });
+  }
+
+  const timeline = [
+    ...reports.map((report) => ({ kind: "report" as const, at: report.capturedAt || report.publishedAt, report })),
+    ...requests.map((request) => ({ kind: "request" as const, at: request.createdAt, request })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+
+  return {
+    event: toEventSummary(event, location, (reportRows ?? []) as { event_id?: string | null; created_by: string; removed_at?: string | null }[], requestRows ?? []),
+    reports,
+    requests: requests.filter((item) => item.status === "open"),
+    reporters: [...reporterMap.values()],
+    timeline,
+    liveStreams: await supabaseListPublicLiveStreams({ eventId: id }),
+  };
+}
+
+export async function supabaseCreateEvent(input: {
+  userId: string;
+  title: string;
+  description: string | null;
+  startedAt: string;
+  location: StructuredLocation;
+}) {
+  const locationId = await supabaseFindOrCreateLocation(input.location);
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("events")
+    .insert({
+      created_by: input.userId,
+      location_id: locationId,
+      title: input.title,
+      description: input.description,
+      status: "active",
+      started_at: input.startedAt,
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message || "Could not create the event.");
+  }
+  return data.id;
+}
+
+export async function supabaseIsUsernameAvailable(username: string, excludeUserId?: string) {
+  const supabase = await createClient();
+  let query = supabase.from("profiles").select("id").eq("username", username);
+  if (excludeUserId) {
+    query = query.neq("id", excludeUserId);
+  }
+  const { data, error } = await query.maybeSingle();
+  if (error) {
+    throw new Error(error.message);
+  }
+  return !data;
+}
+
+export async function supabaseUpdateReporterProfile(
+  userId: string,
+  patch: import("@/lib/profile").ReporterProfilePatch,
+) {
+  const taken = !(await supabaseIsUsernameAvailable(patch.username, userId));
+  if (taken) {
+    throw new Error("username-taken");
+  }
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({
+      username: patch.username,
+      display_name: patch.displayName,
+      bio: patch.bio,
+      home_city: patch.homeCity,
+      home_country: patch.homeCountry,
+      topics: patch.topics,
+    })
+    .eq("id", userId)
+    .select("*")
+    .single();
+  if (error) {
+    if (error.code === "23505") {
+      throw new Error("username-taken");
+    }
+    throw new Error(error.message);
+  }
+  return data;
+}
+
+export async function supabaseSetReporterAvatar(
+  userId: string,
+  file: { bytes: Uint8Array; filename: string; contentType: string; size: number } | null,
+) {
+  const current = await supabaseGetProfileByUserId(userId);
+  if (!current) {
+    throw new Error("profile");
+  }
+  if (!file) {
+    await removeSupabaseReporterAvatar(userId, current.avatar_url);
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({ avatar_url: null })
+      .eq("id", userId)
+      .select("*")
+      .single();
+    if (error || !data) {
+      throw new Error(error?.message || "Could not remove the profile photo.");
+    }
+    return data;
+  }
+  const publicUrl = await uploadSupabaseReporterAvatar({
+    userId,
+    bytes: file.bytes,
+    filename: file.filename,
+    contentType: file.contentType,
+    previousUrl: current.avatar_url,
+  });
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ avatar_url: publicUrl })
+    .eq("id", userId)
+    .select("*")
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message || "Could not save the profile photo.");
+  }
+  return data;
 }

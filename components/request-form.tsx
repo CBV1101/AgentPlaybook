@@ -1,6 +1,15 @@
+"use client";
+
+import { useState } from "react";
+import { useFormStatus } from "react-dom";
 import { createCoverageRequest } from "@/lib/coverage-actions";
+import { EventAssociationField } from "@/components/event-association-field";
 import { GeocodedLocationField } from "@/components/geocoded-location-field";
+import { Button } from "@/components/ui/button";
+import { Field, Textarea, TextInput } from "@/components/ui/field";
+import { ErrorState, Notice } from "@/components/ui/page";
 import { PLATFORM_PUBLISHING_RULE } from "@/lib/moderation";
+import type { GeocodeSuggestion } from "@/lib/location";
 
 const errorCopy: Record<string, string> = {
   supabase: "Supabase is not configured yet, so requests cannot be saved.",
@@ -13,54 +22,48 @@ type RequestFormProps = {
 };
 
 export function RequestForm({ error }: RequestFormProps) {
+  const [pickedLocation, setPickedLocation] = useState<GeocodeSuggestion | null>(null);
+
   return (
-    <form action={createCoverageRequest} className="space-y-5 rounded-2xl border border-stone-200 bg-white p-6 shadow-sm">
-      {error ? (
-        <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-900" role="alert">
-          {errorCopy[error] ?? error}
-        </p>
-      ) : null}
+    <form action={createCoverageRequest} className="space-y-5">
+      {error ? <ErrorState>{errorCopy[error] ?? error}</ErrorState> : null}
 
-      <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-stone-800">
-        {PLATFORM_PUBLISHING_RULE}
-      </p>
+      <Notice>{PLATFORM_PUBLISHING_RULE}</Notice>
 
-      <div>
-        <label htmlFor="title" className="block text-sm font-medium text-stone-700">
-          Question
-        </label>
-        <input
+      <Field label="Question" htmlFor="title">
+        <TextInput
           id="title"
           name="title"
           required
           maxLength={200}
           placeholder="What's actually happening at Görlitzer Park?"
-          className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 outline-none focus:border-stone-500"
         />
-      </div>
+      </Field>
 
-      <GeocodedLocationField />
+      <GeocodedLocationField onSelectedChange={setPickedLocation} />
 
-      <div>
-        <label htmlFor="description" className="block text-sm font-medium text-stone-700">
-          Additional context
-        </label>
-        <textarea
+      <EventAssociationField location={pickedLocation} />
+
+      <Field label="Additional context" htmlFor="description">
+        <Textarea
           id="description"
           name="description"
           rows={5}
           maxLength={5000}
           placeholder="I've seen conflicting reports about conditions in the park. Can someone go there and show what it's actually like firsthand?"
-          className="mt-1 w-full rounded-xl border border-stone-300 px-3 py-2 outline-none focus:border-stone-500"
         />
-      </div>
+      </Field>
 
-      <button
-        type="submit"
-        className="rounded-full bg-stone-900 px-5 py-2.5 text-sm font-medium text-white hover:bg-stone-800"
-      >
-        Publish request
-      </button>
+      <SubmitRequestButton />
     </form>
+  );
+}
+
+function SubmitRequestButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button type="submit" disabled={pending}>
+      {pending ? "Publishing request…" : "Publish request"}
+    </Button>
   );
 }

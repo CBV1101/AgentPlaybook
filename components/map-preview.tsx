@@ -7,7 +7,7 @@ type MapPreviewProps = {
 export function MapPreview({ latitude, longitude, label }: MapPreviewProps) {
   if (latitude === null || longitude === null) {
     return (
-      <div className="flex h-48 items-center justify-center rounded-2xl border border-stone-200 bg-stone-100 text-sm text-stone-600">
+      <div className="flex h-48 items-center justify-center rounded-lg border border-line bg-canvas fh-meta">
         No map preview for this place yet.
       </div>
     );
@@ -23,10 +23,10 @@ export function MapPreview({ latitude, longitude, label }: MapPreviewProps) {
       <iframe
         title={`Map of ${label}`}
         src={src}
-        className="h-48 w-full rounded-2xl border border-stone-200 bg-stone-100"
+        className="h-48 w-full rounded-lg border border-line bg-canvas"
         loading="lazy"
       />
-      <p className="mt-2 text-xs text-stone-500">
+      <p className="mt-2 text-xs text-faint">
         <a href={external} className="underline" target="_blank" rel="noreferrer">
           Open {label} on OpenStreetMap
         </a>

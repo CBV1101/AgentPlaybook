@@ -3,8 +3,8 @@
 import { isRedirectError } from "next/dist/client/components/redirect-error";
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
-import { removeReportedContent, submitModerationReport, updateModerationStatus } from "@/lib/data";
-import { MODERATION_REASONS, type ModerationContentType } from "@/lib/moderation";
+import { removeReportedContent, setReporterLivePrivilege, setSensitiveContentFlag, submitModerationReport, updateModerationStatus } from "@/lib/data";
+import { LIVE_MODERATION_REASON_IDS, MODERATION_REASONS, type ModerationContentType } from "@/lib/moderation";
 import { loginPath, safeNextPath } from "@/lib/paths";
 import { requireAdmin } from "@/lib/require-admin";
 
@@ -31,7 +31,7 @@ export async function submitContentReport(formData: FormData) {
     redirect(loginPath(next));
   }
 
-  if (contentType !== "firsthand_report" && contentType !== "coverage_request") {
+  if (contentType !== "firsthand_report" && contentType !== "coverage_request" && contentType !== "live_stream") {
     redirect(withError(next, "content"));
   }
   if (!contentId) {
@@ -40,6 +40,12 @@ export async function submitContentReport(formData: FormData) {
 
   const reason = formString(formData, "reason");
   if (!MODERATION_REASONS.some((item) => item.id === reason)) {
+    redirect(withError(next, "reason"));
+  }
+  if (
+    contentType === "live_stream" &&
+    !(LIVE_MODERATION_REASON_IDS as readonly string[]).includes(reason)
+  ) {
     redirect(withError(next, "reason"));
   }
 
@@ -88,4 +94,38 @@ export async function removeReportedContentAction(formData: FormData) {
     await removeReportedContent(id);
   }
   redirect("/admin/moderation?notice=removed");
+}
+
+export async function terminateLivestreamAction(formData: FormData) {
+  await requireAdmin();
+  const id = formString(formData, "id");
+  if (id) {
+    await removeReportedContent(id);
+  }
+  redirect("/admin/moderation?notice=terminated");
+}
+
+export async function setLivePrivilegeAction(formData: FormData) {
+  await requireAdmin();
+  const reporterId = formString(formData, "reporter_id");
+  const enabled = formString(formData, "enabled") === "true";
+  if (reporterId) {
+    await setReporterLivePrivilege(reporterId, enabled);
+  }
+  redirect(enabled ? "/admin/moderation?notice=live-enabled" : "/admin/moderation?notice=live-disabled");
+}
+
+export async function setSensitiveContentAction(formData: FormData) {
+  await requireAdmin();
+  const contentType = formString(formData, "content_type");
+  const contentId = formString(formData, "content_id");
+  const next = safeNextPath(formString(formData, "next")) ?? "/admin/moderation";
+  const sensitive = formString(formData, "sensitive") === "true";
+  if (contentType !== "live_stream" && contentType !== "firsthand_report") {
+    redirect(withError(next, "content"));
+  }
+  if (contentId) {
+    await setSensitiveContentFlag({ contentType, contentId, sensitive });
+  }
+  redirect(withNotice(next, sensitive ? "sensitive-on" : "sensitive-off"));
 }

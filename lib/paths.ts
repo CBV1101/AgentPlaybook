@@ -29,3 +29,13 @@ export function withNext(href: string, next?: string | null) {
   const separator = href.includes("?") ? "&" : "?";
   return `${href}${separator}next=${encodeURIComponent(safe)}`;
 }
+
+export function reporterProfileSetupPath(next?: string | null) {
+  const safe = safeNextPath(next);
+  return safe ? `/profile?notice=incomplete&next=${encodeURIComponent(safe)}` : "/profile?notice=incomplete";
+}
+
+export function afterSignupPath(next?: string | null) {
+  const safe = safeNextPath(next);
+  return safe ? `/profile?notice=setup&next=${encodeURIComponent(safe)}` : "/profile?notice=setup";
+}
