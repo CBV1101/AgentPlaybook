@@ -50,6 +50,7 @@ export type FirsthandReport = {
   reporterUsername?: string;
   reporterAvatarUrl?: string | null;
   thumbnailUrl?: string | null;
+  mediaUrl?: string | null;
   licensingStatus?: LicensingStatus;
   requestId?: string | null;
   requestTitle?: string | null;

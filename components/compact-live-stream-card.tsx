@@ -2,7 +2,7 @@ import Link from "next/link";
 import { LivePreview } from "@/components/live-preview";
 import { ReporterAvatar } from "@/components/reporter-avatar";
 import { Badge } from "@/components/ui/badge";
-import { liveHref, type LiveStreamSummary } from "@/lib/live";
+import { reporterProfileHref, type LiveStreamSummary } from "@/lib/live";
 import type { FirsthandReport } from "@/lib/types";
 
 export function CompactLiveStreamCard({
@@ -12,20 +12,30 @@ export function CompactLiveStreamCard({
   demandCount?: number;
   tone?: "stage" | "surface";
 }) {
+  const reporterHref = reporterProfileHref(stream.reporterUsername);
   const live = stream.status === "live";
   return (
-    <article className="min-w-0">
-      <LivePreview stream={stream} autoplay={live} chrome={false} />
-      <p className="fh-place mt-2.5">{stream.location.city}, {stream.location.country}</p>
-      <h3 className="mt-1 line-clamp-2 text-sm font-semibold leading-snug text-ink">
-        <Link href={liveHref(stream.id)} className="hover:underline">
-          {stream.title}
+    <article className="fh-live-tile">
+      <LivePreview stream={stream} autoplay={live} variant="grid" />
+      <p className="fh-place mt-2.5">
+        <Link href={stream.location.href} className="hover:underline">
+          {stream.location.city}, {stream.location.country}
         </Link>
+      </p>
+      <h3 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-ink">
+        {reporterHref ? (
+          <Link href={reporterHref} className="hover:underline">
+            {stream.title}
+          </Link>
+        ) : (
+          stream.title
+        )}
       </h3>
-      <ReporterRow
-        name={stream.reporterName}
-        username={stream.reporterUsername}
-      />
+      {reporterHref ? (
+        <ReporterRow name={stream.reporterName} username={stream.reporterUsername} />
+      ) : (
+        <p className="mt-1.5 text-xs text-muted">{stream.reporterName}</p>
+      )}
     </article>
   );
 }
@@ -36,30 +46,45 @@ export function CompactRecentReportCard({
   report: FirsthandReport;
   tone?: "stage" | "surface";
 }) {
-  const href = `/reports/${report.id}`;
+  const reporterHref = reporterProfileHref(report.reporterUsername);
+  const href = reporterHref ?? (report.id.startsWith("dev-showcase-") ? null : `/reports/${report.id}`);
   const city = report.city ?? report.location;
   const country = report.country ?? "";
+  const thumb = report.thumbnailUrl ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={report.thumbnailUrl} alt="" className="h-full w-full object-cover" />
+  ) : (
+    <span className="flex h-full items-center justify-center text-sm text-surface/80">Recent report</span>
+  );
   return (
-    <article className="min-w-0">
-      <Link href={href} className="relative block aspect-video overflow-hidden rounded-md bg-ink" aria-label={`${city}: ${report.title}`}>
-        {report.thumbnailUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={report.thumbnailUrl} alt="" className="h-full w-full object-cover" />
-        ) : (
-          <span className="flex h-full items-center justify-center text-sm text-surface/80">Recent report</span>
-        )}
-        <span className="absolute left-2 top-2">
-          <Badge>Recent</Badge>
-        </span>
-      </Link>
+    <article className="fh-live-tile">
+      {href ? (
+        <Link href={href} className="fh-live-preview-grid" aria-label={`${report.reporterName} reporter profile`}>
+          {thumb}
+          <span className="absolute left-2 top-2">
+            <Badge>Recent</Badge>
+          </span>
+        </Link>
+      ) : (
+        <div className="fh-live-preview-grid">
+          {thumb}
+          <span className="absolute left-2 top-2">
+            <Badge>Recent</Badge>
+          </span>
+        </div>
+      )}
       <p className="fh-place mt-2.5">
         {city}
         {country ? `, ${country}` : ""}
       </p>
-      <h3 className="mt-1 line-clamp-2 text-sm font-semibold leading-snug text-ink">
-        <Link href={href} className="hover:underline">
-          {report.title}
-        </Link>
+      <h3 className="mt-1 line-clamp-2 text-[15px] font-semibold leading-snug text-ink">
+        {href ? (
+          <Link href={href} className="hover:underline">
+            {report.title}
+          </Link>
+        ) : (
+          report.title
+        )}
       </h3>
       {report.reporterUsername ? (
         <ReporterRow

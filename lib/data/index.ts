@@ -16,14 +16,17 @@ import {
   mockExpressInterest,
   mockFollowLocation,
   mockFollowReporter,
+  mockFollowInvestigation,
   mockGetFollowingFeed,
   mockGetFollowGraph,
   mockIsFollowingLocation,
   mockIsFollowingReporter,
+  mockIsFollowingInvestigation,
   mockSupportReport,
   mockUpdateLicensingInquiryStatus,
   mockUnfollowLocation,
   mockUnfollowReporter,
+  mockUnfollowInvestigation,
   mockFindOrCreateLocation,
   mockGetCoverageRequestPage,
   mockGetHomeFeed,
@@ -70,6 +73,25 @@ import {
   mockUpdateNotificationPreferences,
 } from "@/lib/data/mock/notification-repository";
 import {
+  mockAddInvestigationContent,
+  mockAppendLiveToInvestigation,
+  mockAppendReportToInvestigation,
+  mockCreateInvestigation,
+  mockDeleteInvestigation,
+  mockEligibleInvestigationContent,
+  mockGetInvestigationPage,
+  mockGetOwnedInvestigation,
+  mockLinkLiveRecordingToInvestigation,
+  mockListInvestigationOptions,
+  mockListPublishedInvestigations,
+  mockListPublicInvestigationsForReporter,
+  mockListReporterInvestigations,
+  mockLookupInvestigationForReport,
+  mockRemoveInvestigationItem,
+  mockReorderInvestigationItems,
+  mockUpdateInvestigation,
+} from "@/lib/data/mock/investigation-repository";
+import {
   supabaseCreateEvent,
   supabaseGetEventPage,
   supabaseListActiveEvents,
@@ -86,14 +108,17 @@ import {
   supabaseExpressInterest,
   supabaseFollowLocation,
   supabaseFollowReporter,
+  supabaseFollowInvestigation,
   supabaseGetFollowingFeed,
   supabaseGetFollowGraph,
   supabaseIsFollowingLocation,
   supabaseIsFollowingReporter,
+  supabaseIsFollowingInvestigation,
   supabaseSupportReport,
   supabaseUpdateLicensingInquiryStatus,
   supabaseUnfollowLocation,
   supabaseUnfollowReporter,
+  supabaseUnfollowInvestigation,
   supabaseFindOrCreateLocation,
   supabaseGetCoverageRequestPage,
   supabaseGetHomeFeed,
@@ -141,6 +166,26 @@ import {
   supabaseUnreadNotificationCount,
   supabaseUpdateNotificationPreferences,
 } from "@/lib/data/supabase/notification-repository";
+import {
+  supabaseAddInvestigationContent,
+  supabaseAppendLiveToInvestigation,
+  supabaseAppendReportToInvestigation,
+  supabaseCreateInvestigation,
+  supabaseDeleteInvestigation,
+  supabaseEligibleInvestigationContent,
+  supabaseGetInvestigationPage,
+  supabaseGetOwnedInvestigation,
+  supabaseLinkLiveRecordingToInvestigation,
+  supabaseListInvestigationOptions,
+  supabaseListPublishedInvestigations,
+  supabaseListPublicInvestigationsForReporter,
+  supabaseListReporterInvestigations,
+  supabaseLookupInvestigationForReport,
+  supabaseRemoveInvestigationItem,
+  supabaseReorderInvestigationItems,
+  supabaseUpdateInvestigation,
+} from "@/lib/data/supabase/investigation-repository";
+import type { InvestigationStatus } from "@/lib/database.types";
 import type { EventSummary } from "@/lib/types";
 import type { LiveStreamSummary } from "@/lib/live";
 import type { GeoFollowTarget } from "@/lib/follows";
@@ -281,8 +326,32 @@ export async function unfollowLocation(userId: string, target: GeoFollowTarget) 
   return isMockMode() ? mockUnfollowLocation(userId, target) : supabaseUnfollowLocation(userId, target);
 }
 
-export async function getFollowingFeed(userId: string) {
-  return isMockMode() ? mockGetFollowingFeed(userId) : supabaseGetFollowingFeed(userId);
+export async function isFollowingInvestigation(userId: string, investigationId: string) {
+  return isMockMode()
+    ? mockIsFollowingInvestigation(userId, investigationId)
+    : supabaseIsFollowingInvestigation(userId, investigationId);
+}
+
+export async function followInvestigation(userId: string, investigationId: string) {
+  return isMockMode()
+    ? mockFollowInvestigation(userId, investigationId)
+    : supabaseFollowInvestigation(userId, investigationId);
+}
+
+export async function unfollowInvestigation(userId: string, investigationId: string) {
+  return isMockMode()
+    ? mockUnfollowInvestigation(userId, investigationId)
+    : supabaseUnfollowInvestigation(userId, investigationId);
+}
+
+export async function getFollowingFeed(
+  userId: string,
+  before?: string | null,
+  excludeReportIds?: Iterable<string>,
+) {
+  return isMockMode()
+    ? mockGetFollowingFeed(userId, before, excludeReportIds)
+    : supabaseGetFollowingFeed(userId, before, excludeReportIds);
 }
 
 export async function getFollowGraph(userId: string) {
@@ -364,8 +433,19 @@ export async function completeImageMediaUpload(userId: string, mediaId: string, 
     : supabaseCompleteImageMedia(userId, mediaId, publicUrl);
 }
 
-export async function publishReportRecord(userId: string, reportId: string) {
-  return isMockMode() ? mockPublishReport(userId, reportId) : supabasePublishReport(userId, reportId);
+export async function publishReportRecord(userId: string, reportId: string, investigationId?: string | null) {
+  if (isMockMode()) {
+    const id = await mockPublishReport(userId, reportId);
+    if (investigationId) {
+      await mockAppendReportToInvestigation(userId, reportId, investigationId);
+    }
+    return id;
+  }
+  const id = await supabasePublishReport(userId, reportId);
+  if (investigationId) {
+    await supabaseAppendReportToInvestigation(userId, reportId, investigationId);
+  }
+  return id;
 }
 
 export async function submitModerationReport(input: {
@@ -474,8 +554,20 @@ export async function createLiveStreamRecord(input: {
   locationId: string;
   eventId?: string | null;
   requestId?: string | null;
+  investigationId?: string | null;
 }) {
-  return isMockMode() ? mockCreateLiveStream(input) : supabaseCreateLiveStream(input);
+  if (isMockMode()) {
+    const created = await mockCreateLiveStream(input);
+    if (input.investigationId) {
+      await mockAppendLiveToInvestigation(input.userId, created.id, input.investigationId);
+    }
+    return created;
+  }
+  const created = await supabaseCreateLiveStream(input);
+  if (input.investigationId) {
+    await supabaseAppendLiveToInvestigation(input.userId, created.id, input.investigationId);
+  }
+  return created;
 }
 
 export async function liveBroadcastSession(userId: string, streamId: string) {
@@ -495,7 +587,14 @@ export async function heartbeatLiveStream(userId: string, streamId: string) {
 }
 
 export async function endLiveStreamRecord(userId: string, streamId: string) {
-  return isMockMode() ? mockEndLiveStream(userId, streamId) : supabaseEndLiveStream(userId, streamId);
+  if (isMockMode()) {
+    const result = await mockEndLiveStream(userId, streamId);
+    mockLinkLiveRecordingToInvestigation(streamId, result.reportId);
+    return result;
+  }
+  const result = await supabaseEndLiveStream(userId, streamId);
+  await supabaseLinkLiveRecordingToInvestigation(streamId, result.reportId);
+  return result;
 }
 
 export async function setReporterLivePrivilege(reporterId: string, canLiveStream: boolean) {
@@ -544,4 +643,99 @@ export async function updateNotificationPreferences(userId: string, next: Notifi
   return isMockMode()
     ? mockUpdateNotificationPreferences(userId, next)
     : supabaseUpdateNotificationPreferences(userId, next);
+}
+
+export async function listPublishedInvestigations() {
+  return isMockMode() ? mockListPublishedInvestigations() : supabaseListPublishedInvestigations();
+}
+
+export async function listPublicInvestigationsForReporter(reporterId: string) {
+  return isMockMode()
+    ? mockListPublicInvestigationsForReporter(reporterId)
+    : supabaseListPublicInvestigationsForReporter(reporterId);
+}
+
+export async function listReporterInvestigations(userId: string) {
+  return isMockMode() ? mockListReporterInvestigations(userId) : supabaseListReporterInvestigations(userId);
+}
+
+export async function listInvestigationOptions(userId: string) {
+  return isMockMode() ? mockListInvestigationOptions(userId) : supabaseListInvestigationOptions(userId);
+}
+
+export async function getInvestigationPage(username: string, slug: string, viewerId?: string | null) {
+  return isMockMode()
+    ? mockGetInvestigationPage(username, slug, viewerId)
+    : supabaseGetInvestigationPage(username, slug, viewerId);
+}
+
+export async function getOwnedInvestigation(userId: string, id: string) {
+  return isMockMode() ? mockGetOwnedInvestigation(userId, id) : supabaseGetOwnedInvestigation(userId, id);
+}
+
+export async function createInvestigationRecord(input: {
+  userId: string;
+  title: string;
+  description: string | null;
+  locationId?: string | null;
+  status: InvestigationStatus;
+}) {
+  return isMockMode() ? mockCreateInvestigation(input) : supabaseCreateInvestigation(input);
+}
+
+export async function updateInvestigationRecord(
+  userId: string,
+  id: string,
+  patch: {
+    title?: string;
+    description?: string | null;
+    status?: InvestigationStatus;
+    locationId?: string | null;
+  },
+) {
+  return isMockMode()
+    ? mockUpdateInvestigation(userId, id, patch)
+    : supabaseUpdateInvestigation(userId, id, patch);
+}
+
+export async function deleteInvestigationRecord(userId: string, id: string) {
+  return isMockMode() ? mockDeleteInvestigation(userId, id) : supabaseDeleteInvestigation(userId, id);
+}
+
+export async function addInvestigationContentRecord(
+  userId: string,
+  investigationId: string,
+  input: { reportId?: string | null; liveStreamId?: string | null },
+) {
+  return isMockMode()
+    ? mockAddInvestigationContent(userId, investigationId, input)
+    : supabaseAddInvestigationContent(userId, investigationId, input);
+}
+
+export async function removeInvestigationItemRecord(userId: string, itemId: string) {
+  return isMockMode()
+    ? mockRemoveInvestigationItem(userId, itemId)
+    : supabaseRemoveInvestigationItem(userId, itemId);
+}
+
+export async function reorderInvestigationItemsRecord(
+  userId: string,
+  investigationId: string,
+  orderedItemIds: string[],
+) {
+  return isMockMode()
+    ? mockReorderInvestigationItems(userId, investigationId, orderedItemIds)
+    : supabaseReorderInvestigationItems(userId, investigationId, orderedItemIds);
+}
+
+export async function listEligibleInvestigationContent(userId: string) {
+  return isMockMode()
+    ? mockEligibleInvestigationContent(userId)
+    : supabaseEligibleInvestigationContent(userId);
+}
+
+export async function lookupInvestigationForReport(reportId: string) {
+  return isMockMode()
+    ? mockLookupInvestigationForReport(reportId)
+    : supabaseLookupInvestigationForReport(reportId);
 }

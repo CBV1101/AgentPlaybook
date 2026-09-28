@@ -35,3 +35,7 @@ export function exploreIsActive(pathname: string) {
     pathname.startsWith("/place/")
   );
 }
+
+export function investigationsIsActive(pathname: string) {
+  return pathname === "/investigations" || pathname.startsWith("/investigations/");
+}

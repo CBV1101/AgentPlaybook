@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { LiveBadge, LocationLabel } from "@/components/ui/badge";
 import { SensitiveContentGate } from "@/components/sensitive-content-gate";
-import { liveHref, type LiveStreamSummary } from "@/lib/live";
+import { reporterProfileHref, type LiveStreamSummary } from "@/lib/live";
 
 const MAX_SIMULTANEOUS_PREVIEWS = 6;
 const playingIds = new Set<string>();
@@ -24,25 +24,42 @@ function releasePreview(id: string) {
   playingIds.delete(id);
 }
 
+export type LivePreviewVariant = "grid" | "globeThumbnail" | "full";
+
+function previewClass(variant: LivePreviewVariant) {
+  if (variant === "grid") {
+    return "fh-live-preview-grid";
+  }
+  if (variant === "globeThumbnail") {
+    return "fh-live-preview-thumb";
+  }
+  return "fh-live-preview-full";
+}
+
 export function LivePreview({
   stream,
   featured = false,
   autoplay = true,
   chrome = true,
+  variant,
 }: {
   stream: LiveStreamSummary;
   featured?: boolean;
   autoplay?: boolean;
   chrome?: boolean;
+  variant: LivePreviewVariant;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const reducedMotion = useRef(false);
   const [inView, setInView] = useState(false);
   const [slot, setSlot] = useState(false);
-  const href = liveHref(stream.id);
+  const href = reporterProfileHref(stream.reporterUsername);
   const fileUrl = stream.playbackKind === "file" ? stream.playbackUrl : null;
   const mayAutoplay = autoplay && !stream.sensitiveContent && Boolean(fileUrl) && inView && slot;
+  const isGrid = variant === "grid";
+  const isThumb = variant === "globeThumbnail";
+  const showChrome = isGrid || isThumb ? false : chrome;
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -97,7 +114,11 @@ export function LivePreview({
 
   return (
     <SensitiveContentGate active={stream.sensitiveContent}>
-      <div ref={wrapRef} className="relative block aspect-video overflow-hidden rounded-md bg-ink">
+      <div
+        ref={wrapRef}
+        className={previewClass(variant)}
+        data-live-preview={variant}
+      >
         {mayAutoplay && fileUrl ? (
           <video
             ref={videoRef}
@@ -118,7 +139,7 @@ export function LivePreview({
             </span>
           </div>
         )}
-        {chrome ? (
+        {showChrome ? (
           <>
             <span className="absolute left-2 top-2">
               <LiveBadge />
@@ -135,7 +156,7 @@ export function LivePreview({
               />
             </div>
           </>
-        ) : (
+        ) : isThumb ? null : (
           <>
             {stream.status === "live" ? (
               <span className="absolute left-2 top-2">
@@ -153,7 +174,9 @@ export function LivePreview({
             ) : null}
           </>
         )}
-        <Link href={href} className="absolute inset-0" aria-label={`${stream.location.city}: ${stream.title}`} />
+        {isThumb || !href ? null : (
+          <Link href={href} className="absolute inset-0" aria-label={`${stream.reporterName} reporter profile`} />
+        )}
       </div>
     </SensitiveContentGate>
   );

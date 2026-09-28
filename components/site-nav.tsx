@@ -7,7 +7,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { ReporterAvatar } from "@/components/reporter-avatar";
 import { SearchBox } from "@/components/search-box";
 import { signOut } from "@/lib/auth-actions";
-import { exploreIsActive, REPORT_ACTIONS, reportActionHref } from "@/lib/nav";
+import { exploreIsActive, investigationsIsActive, REPORT_ACTIONS, reportActionHref } from "@/lib/nav";
 import { loginPath, signupPath } from "@/lib/paths";
 
 export type SiteNavProps = {
@@ -143,6 +143,7 @@ export function SiteNav({
   const publicProfileHref = username ? `/u/${username}` : "/profile";
   const exploreActive = exploreIsActive(pathname);
   const wantedActive = pathname === "/wanted";
+  const investigationsActive = investigationsIsActive(pathname);
   const searchActive = pathname === "/search";
   const followingActive = pathname === "/following";
   const profileActive = pathname === "/profile" || pathname.startsWith("/profile/") || pathname.startsWith("/u/");
@@ -159,6 +160,15 @@ export function SiteNav({
               Firsthand
             </Link>
             <nav aria-label="Primary" className="hidden items-center gap-5 md:flex">
+              {isAuthenticated ? (
+                <Link
+                  href="/following"
+                  className={navLinkClass}
+                  aria-current={followingActive ? "page" : undefined}
+                >
+                  Following
+                </Link>
+              ) : null}
               <Link
                 href="/browse"
                 className={navLinkClass}
@@ -173,15 +183,13 @@ export function SiteNav({
               >
                 Coverage wanted
               </Link>
-              {isAuthenticated ? (
-                <Link
-                  href="/following"
-                  className={navLinkClass}
-                  aria-current={followingActive ? "page" : undefined}
-                >
-                  Following
-                </Link>
-              ) : null}
+              <Link
+                href="/investigations"
+                className={navLinkClass}
+                aria-current={investigationsActive ? "page" : undefined}
+              >
+                Investigations
+              </Link>
             </nav>
           </div>
 
@@ -291,7 +299,7 @@ export function SiteNav({
         aria-label="Mobile"
         className="fixed inset-x-0 bottom-0 z-40 border-t border-line bg-canvas/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
       >
-        <ul className="mx-auto grid max-w-5xl grid-cols-5 items-end px-2 pt-2">
+        <ul className="mx-auto grid max-w-5xl grid-cols-6 items-end px-1 pt-2">
           <li>
             <MobileNavLink href="/browse" label="Explore" active={exploreActive} icon="explore" />
           </li>
@@ -312,6 +320,14 @@ export function SiteNav({
               <span className="text-2xl leading-none">+</span>
               <span className="text-[10px] font-medium">Report</span>
             </button>
+          </li>
+          <li>
+            <MobileNavLink
+              href="/investigations"
+              label="Investigations"
+              active={investigationsActive}
+              icon="investigations"
+            />
           </li>
           <li>
             <MobileNavLink
@@ -449,7 +465,7 @@ function MobileNavLink({
   href: string;
   label: string;
   active: boolean;
-  icon: "explore" | "wanted" | "following" | "profile";
+  icon: "explore" | "wanted" | "following" | "profile" | "investigations";
 }) {
   return (
     <Link
@@ -465,13 +481,14 @@ function MobileNavLink({
   );
 }
 
-function MobileIcon({ name }: { name: "explore" | "wanted" | "following" | "profile" }) {
+function MobileIcon({ name }: { name: "explore" | "wanted" | "following" | "profile" | "investigations" }) {
   const paths = {
     explore: "M12 21s7-5.4 7-11a7 7 0 1 0-14 0c0 5.6 7 11 7 11z M12 10.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z",
     wanted: "M4 6h16M4 12h16M4 18h10",
     following:
       "M15 11a3.5 3.5 0 1 0-7 0 3.5 3.5 0 0 0 7 0zM5 20a6 6 0 0 1 12 0M19 8.5a2.5 2.5 0 1 0-2 4.2M21 20a5 5 0 0 0-3-4.6",
     profile: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM6 20a6 6 0 0 1 12 0",
+    investigations: "M5 4h14v16H5z M8 8h8 M8 12h8 M8 16h5",
   };
 
   return (

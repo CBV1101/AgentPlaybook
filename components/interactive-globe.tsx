@@ -2,328 +2,470 @@
 
 import { useEffect, useId, useRef } from "react";
 import type { GlobeActivityMarker } from "@/lib/coverage-opportunity";
+import { latLngToVector, SEARCH_PLACE_MARKER_ID } from "@/lib/globe-coords";
+import type { GlobeAnchor } from "@/lib/explore-popup";
 
-const KIND_COLOR = {
-  live: "#c8102e",
-  wanted: "#b56a4c",
-  report: "#2f5d62",
-} as const;
-
-export const GLOBE_LOCAL_ZOOM = 2.6;
+export const GLOBE_LOCAL_ZOOM = 3.3;
 
 export type GlobeFocus = {
   latitude: number;
   longitude: number;
   zoom?: number;
+  nonce?: number;
 };
+
+export type { GlobeAnchor } from "@/lib/explore-popup";
+
+export type GlobeAnchorLocation = {
+  latitude: number;
+  longitude: number;
+};
+
+const KIND_COLOR = {
+  live: 0xc8102e,
+  wanted: 0xb56a4c,
+  report: 0x2f5d62,
+} as const;
 
 type InteractiveGlobeProps = {
   markers: GlobeActivityMarker[];
   selectedId?: string | null;
+  anchorLocation?: GlobeAnchorLocation | null;
   focus?: GlobeFocus | null;
   onSelect: (id: string) => void;
   onZoomChange?: (zoom: number) => void;
+  onAnchorChange?: (anchor: GlobeAnchor | null) => void;
+  pauseRotation?: boolean;
+  idleRotate?: boolean;
+  size?: "hero" | "explore";
 };
 
-function project(
-  lat: number,
-  lng: number,
-  yaw: number,
-  pitch: number,
-  radius: number,
-  cx: number,
-  cy: number,
-) {
-  const lam = ((lng - yaw) * Math.PI) / 180;
-  const phi = (lat * Math.PI) / 180;
-  const phi0 = (pitch * Math.PI) / 180;
-  const cosC = Math.sin(phi0) * Math.sin(phi) + Math.cos(phi0) * Math.cos(phi) * Math.cos(lam);
-  if (cosC < 0) {
-    return null;
-  }
-  const x = radius * Math.cos(phi) * Math.sin(lam);
-  const y = radius * (Math.cos(phi0) * Math.sin(phi) - Math.sin(phi0) * Math.cos(phi) * Math.cos(lam));
-  return { x: cx + x, y: cy - y, depth: cosC };
-}
-
-export function InteractiveGlobe({ markers, selectedId, focus, onSelect, onZoomChange }: InteractiveGlobeProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+export function InteractiveGlobe({
+  markers,
+  selectedId,
+  anchorLocation = null,
+  focus,
+  onSelect,
+  onZoomChange,
+  onAnchorChange,
+  pauseRotation = false,
+  idleRotate = true,
+  size = "explore",
+}: InteractiveGlobeProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
-  const state = useRef({
-    yaw: 10,
-    pitch: 18,
-    zoom: 1.15,
-    dragging: false,
-    lastX: 0,
-    lastY: 0,
-    reduced: false,
-  });
-  const lastZoom = useRef(1.15);
-  const drawRef = useRef<() => void>(() => undefined);
-  const onZoomChangeRef = useRef(onZoomChange);
   const labelId = useId();
+  const markersRef = useRef(markers);
+  const selectedRef = useRef(selectedId);
+  const anchorLocRef = useRef(anchorLocation);
+  const onSelectRef = useRef(onSelect);
+  const onZoomRef = useRef(onZoomChange);
+  const onAnchorRef = useRef(onAnchorChange);
+  const pauseRef = useRef(pauseRotation);
+  const idleRef = useRef(idleRotate);
+  const focusRef = useRef(focus);
+  const reducedRef = useRef(false);
 
   useEffect(() => {
-    onZoomChangeRef.current = onZoomChange;
+    markersRef.current = markers;
+  }, [markers]);
+  useEffect(() => {
+    selectedRef.current = selectedId;
+  }, [selectedId]);
+  useEffect(() => {
+    anchorLocRef.current = anchorLocation;
+  }, [anchorLocation]);
+  useEffect(() => {
+    onSelectRef.current = onSelect;
+  }, [onSelect]);
+  useEffect(() => {
+    onZoomRef.current = onZoomChange;
   }, [onZoomChange]);
-
-  function notifyZoom(next: number) {
-    const prev = lastZoom.current;
-    const crossed = prev < GLOBE_LOCAL_ZOOM !== next < GLOBE_LOCAL_ZOOM;
-    if (crossed || Math.abs(next - prev) >= 0.2) {
-      lastZoom.current = next;
-      onZoomChangeRef.current?.(next);
-    }
-  }
+  useEffect(() => {
+    onAnchorRef.current = onAnchorChange;
+  }, [onAnchorChange]);
+  useEffect(() => {
+    pauseRef.current = pauseRotation;
+  }, [pauseRotation]);
+  useEffect(() => {
+    idleRef.current = idleRotate;
+  }, [idleRotate]);
+  useEffect(() => {
+    focusRef.current = focus;
+  }, [focus]);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    state.current.reduced = media.matches;
+    reducedRef.current = media.matches;
     const onChange = () => {
-      state.current.reduced = media.matches;
+      reducedRef.current = media.matches;
     };
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
   }, []);
 
   useEffect(() => {
-    if (!focus) {
-      return;
-    }
-    const targetYaw = focus.longitude;
-    const targetPitch = Math.max(-40, Math.min(40, focus.latitude));
-    const targetZoom = focus.zoom ?? 2.4;
-    const start = { ...state.current };
-    if (state.current.reduced) {
-      state.current.yaw = targetYaw;
-      state.current.pitch = targetPitch;
-      state.current.zoom = targetZoom;
-      notifyZoom(targetZoom);
-      drawRef.current();
-      return;
-    }
-    const t0 = performance.now();
-    let frame = 0;
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - t0) / 700);
-      const e = 1 - (1 - t) ** 3;
-      state.current.yaw = start.yaw + (targetYaw - start.yaw) * e;
-      state.current.pitch = start.pitch + (targetPitch - start.pitch) * e;
-      const next = start.zoom + (targetZoom - start.zoom) * e;
-      state.current.zoom = next;
-      notifyZoom(next);
-      drawRef.current();
-      if (t < 1) {
-        frame = requestAnimationFrame(tick);
-      }
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [focus]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const wrap = wrapRef.current;
-    if (!canvas || !wrap) {
-      return;
-    }
-    const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      return;
-    }
-
-    const draw = () => {
-      const rect = wrap.getBoundingClientRect();
-      const dpr = Math.min(2, window.devicePixelRatio || 1);
-      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const w = rect.width;
-      const h = rect.height;
-      const cx = w / 2;
-      const cy = h / 2;
-      const radius = Math.min(w, h) * 0.38 * state.current.zoom;
-      const { yaw, pitch } = state.current;
-
-      ctx.clearRect(0, 0, w, h);
-      ctx.fillStyle = "#e4eeef";
-      ctx.fillRect(0, 0, w, h);
-
-      const grd = ctx.createRadialGradient(cx - radius * 0.3, cy - radius * 0.35, radius * 0.2, cx, cy, radius);
-      grd.addColorStop(0, "#f7fbfb");
-      grd.addColorStop(0.55, "#d5e3e5");
-      grd.addColorStop(1, "#9bb6b9");
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.fillStyle = grd;
-      ctx.fill();
-      ctx.strokeStyle = "rgba(47, 93, 98, 0.45)";
-      ctx.lineWidth = 1.25;
-      ctx.stroke();
-
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.strokeStyle = "rgba(47, 93, 98, 0.28)";
-      ctx.lineWidth = 1;
-      for (let lat = -60; lat <= 60; lat += 30) {
-        ctx.beginPath();
-        let started = false;
-        for (let lng = -180; lng <= 180; lng += 6) {
-          const p = project(lat, lng, yaw, pitch, radius, cx, cy);
-          if (!p) {
-            started = false;
-            continue;
-          }
-          if (!started) {
-            ctx.moveTo(p.x, p.y);
-            started = true;
-          } else {
-            ctx.lineTo(p.x, p.y);
-          }
-        }
-        ctx.stroke();
-      }
-      for (let lng = -150; lng <= 180; lng += 30) {
-        ctx.beginPath();
-        let started = false;
-        for (let lat = -80; lat <= 80; lat += 6) {
-          const p = project(lat, lng, yaw, pitch, radius, cx, cy);
-          if (!p) {
-            started = false;
-            continue;
-          }
-          if (!started) {
-            ctx.moveTo(p.x, p.y);
-            started = true;
-          } else {
-            ctx.lineTo(p.x, p.y);
-          }
-        }
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      const plotted = markers
-        .map((marker) => {
-          const p = project(marker.latitude, marker.longitude, yaw, pitch, radius, cx, cy);
-          return p ? { marker, ...p } : null;
-        })
-        .filter((item): item is NonNullable<typeof item> => Boolean(item))
-        .sort((a, b) => a.depth - b.depth);
-
-      for (const item of plotted) {
-        const selected = item.marker.id === selectedId;
-        ctx.beginPath();
-        ctx.arc(item.x, item.y, selected ? 7 : 5, 0, Math.PI * 2);
-        ctx.fillStyle = KIND_COLOR[item.marker.kind];
-        ctx.fill();
-        if (selected) {
-          ctx.strokeStyle = "#171716";
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-        }
-      }
-
-    };
-    drawRef.current = draw;
-    draw();
-    const onResize = () => draw();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [markers, selectedId]);
-
-  useEffect(() => {
     const wrap = wrapRef.current;
     if (!wrap) {
       return;
     }
-    const onPointerDown = (event: PointerEvent) => {
-      state.current.dragging = true;
-      state.current.lastX = event.clientX;
-      state.current.lastY = event.clientY;
-      wrap.setPointerCapture(event.pointerId);
-    };
-    const onPointerMove = (event: PointerEvent) => {
-      if (!state.current.dragging) {
+    const root = wrap;
+    let disposed = false;
+    let renderer: import("three").WebGLRenderer | null = null;
+    let frame = 0;
+
+    void (async () => {
+      const THREE = await import("three");
+      if (disposed || !wrapRef.current) {
         return;
       }
-      const dx = event.clientX - state.current.lastX;
-      const dy = event.clientY - state.current.lastY;
-      state.current.lastX = event.clientX;
-      state.current.lastY = event.clientY;
-      state.current.yaw -= dx * 0.35;
-      state.current.pitch = Math.max(-50, Math.min(50, state.current.pitch + dy * 0.2));
-      drawRef.current();
-    };
-    const onPointerUp = () => {
-      state.current.dragging = false;
-    };
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const next = Math.max(0.9, Math.min(3.6, state.current.zoom - event.deltaY * 0.0015));
-      state.current.zoom = next;
-      notifyZoom(next);
-      drawRef.current();
-    };
-    wrap.addEventListener("pointerdown", onPointerDown);
-    wrap.addEventListener("pointermove", onPointerMove);
-    wrap.addEventListener("pointerup", onPointerUp);
-    wrap.addEventListener("pointercancel", onPointerUp);
-    wrap.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      wrap.removeEventListener("pointerdown", onPointerDown);
-      wrap.removeEventListener("pointermove", onPointerMove);
-      wrap.removeEventListener("pointerup", onPointerUp);
-      wrap.removeEventListener("pointercancel", onPointerUp);
-      wrap.removeEventListener("wheel", onWheel);
-    };
-  }, []);
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x070b12);
+      const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 40);
+      const distance = { current: size === "hero" ? 4.35 : 4.05 };
+      camera.position.set(0, 0.12, distance.current);
+      camera.lookAt(0, 0, 0);
 
-  function hitTest(clientX: number, clientY: number) {
-    const canvas = canvasRef.current;
-    const wrap = wrapRef.current;
-    if (!canvas || !wrap) {
-      return null;
-    }
-    const rect = wrap.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    const cx = rect.width / 2;
-    const cy = rect.height / 2;
-    const radius = Math.min(rect.width, rect.height) * 0.38 * state.current.zoom;
-    let best: { id: string; d: number } | null = null;
-    for (const marker of markers) {
-      const p = project(marker.latitude, marker.longitude, state.current.yaw, state.current.pitch, radius, cx, cy);
-      if (!p) {
-        continue;
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+      root.appendChild(renderer.domElement);
+      renderer.domElement.className = "h-full w-full cursor-grab touch-none active:cursor-grabbing";
+      renderer.domElement.style.display = "block";
+
+      const earth = new THREE.Group();
+      scene.add(earth);
+
+      const geometry = new THREE.SphereGeometry(1, 96, 64);
+      // NASA Blue Marble Next Generation (Dec 2004, public domain / NASA Visible Earth)
+      const texture = new THREE.TextureLoader().load("/geo/earth-blue-marble.jpg");
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.anisotropy = 8;
+      const material = new THREE.MeshPhongMaterial({
+        map: texture,
+        shininess: 8,
+        specular: new THREE.Color(0x222222),
+      });
+      const globe = new THREE.Mesh(geometry, material);
+      earth.add(globe);
+
+      const atmosphere = new THREE.Mesh(
+        new THREE.SphereGeometry(1.035, 64, 48),
+        new THREE.MeshBasicMaterial({
+          color: 0x7eb6ff,
+          transparent: true,
+          opacity: 0.14,
+          side: THREE.BackSide,
+        }),
+      );
+      earth.add(atmosphere);
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.88));
+      const sun = new THREE.DirectionalLight(0xfff4e5, 1.15);
+      sun.position.set(-1.2, 0.9, 3.2);
+      scene.add(sun);
+
+      const markerGroup = new THREE.Group();
+      earth.add(markerGroup);
+      const markerMeshes: { id: string; mesh: import("three").Mesh }[] = [];
+
+      function rebuildMarkers() {
+        while (markerGroup.children.length) {
+          const child = markerGroup.children[0]!;
+          markerGroup.remove(child);
+          if (child instanceof THREE.Mesh) {
+            child.geometry.dispose();
+            if (Array.isArray(child.material)) {
+              child.material.forEach((item) => item.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        }
+        markerMeshes.length = 0;
+        const visible = densify(markersRef.current, distance.current, selectedRef.current);
+        for (const marker of visible) {
+          const selected = marker.id === selectedRef.current;
+          const radius = selected ? 0.018 : 0.012;
+          const mesh = new THREE.Mesh(
+            new THREE.SphereGeometry(radius, 12, 12),
+            new THREE.MeshBasicMaterial({ color: KIND_COLOR[marker.kind] }),
+          );
+          const outline = new THREE.Mesh(
+            new THREE.SphereGeometry(radius * 1.28, 12, 12),
+            new THREE.MeshBasicMaterial({ color: 0x1a1a1a }),
+          );
+          const point = latLngToVector(marker.latitude, marker.longitude, 1.012);
+          mesh.position.set(point.x, point.y, point.z);
+          outline.position.copy(mesh.position);
+          markerGroup.add(outline);
+          markerGroup.add(mesh);
+          if (selected) {
+            const halo = new THREE.Mesh(
+              new THREE.SphereGeometry(radius * 1.7, 12, 12),
+              new THREE.MeshBasicMaterial({ color: 0xfffcf7, transparent: true, opacity: 0.55 }),
+            );
+            halo.position.copy(mesh.position);
+            markerGroup.add(halo);
+          }
+          markerMeshes.push({ id: marker.id, mesh });
+        }
       }
-      const d = Math.hypot(p.x - x, p.y - y);
-      if (d < 14 && (!best || d < best.d)) {
-        best = { id: marker.id, d };
+
+      const pointer = { dragging: false, moved: false, lastX: 0, lastY: 0 };
+      const focusAnim = {
+        active: false,
+        t0: 0,
+        from: new THREE.Vector3(),
+        to: new THREE.Vector3(),
+      };
+
+      function applyFocus(next: GlobeFocus) {
+        const point = latLngToVector(next.latitude, next.longitude, 1);
+        const dir = new THREE.Vector3(point.x, point.y, point.z).normalize();
+        const dist = next.zoom ?? (size === "hero" ? 3.55 : 3.3);
+        distance.current = dist;
+        earth.quaternion.identity();
+        focusAnim.from.copy(camera.position);
+        focusAnim.to.copy(dir.multiplyScalar(dist));
+        focusAnim.t0 = performance.now();
+        focusAnim.active = !reducedRef.current;
+        if (reducedRef.current) {
+          camera.position.copy(focusAnim.to);
+          camera.up.set(0, 1, 0);
+          camera.lookAt(0, 0, 0);
+        }
       }
-    }
-    return best?.id ?? null;
-  }
+
+      function resize() {
+        const rect = root.getBoundingClientRect();
+        const w = Math.max(1, rect.width);
+        const h = Math.max(1, rect.height);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer?.setSize(w, h, true);
+      }
+
+      function projectSelected(): GlobeAnchor | null {
+        const pin =
+          anchorLocRef.current ??
+          markersRef.current.find((item) => item.id === selectedRef.current) ??
+          null;
+        if (!pin || !renderer) {
+          return null;
+        }
+        const local = latLngToVector(pin.latitude, pin.longitude, 1.02);
+        const world = new THREE.Vector3(local.x, local.y, local.z).applyQuaternion(earth.quaternion);
+        const view = camera.clone();
+        if (focusAnim.active) {
+          view.position.copy(focusAnim.to);
+          view.up.set(0, 1, 0);
+          view.lookAt(0, 0, 0);
+        }
+        view.updateProjectionMatrix();
+        view.updateMatrixWorld();
+        const camDir = view.position.clone().normalize();
+        const facing = world.clone().normalize().dot(camDir) > 0;
+        const projected = world.clone().project(view);
+        const rect = root.getBoundingClientRect();
+        return {
+          x: (projected.x * 0.5 + 0.5) * rect.width,
+          y: (-projected.y * 0.5 + 0.5) * rect.height,
+          visible: facing && projected.z <= 1 && projected.z >= -1,
+          wrapW: rect.width,
+          wrapH: rect.height,
+        };
+      }
+
+      const lastFocusKey = { current: "" };
+      function consumeFocus() {
+        const next = focusRef.current;
+        const key = next ? `${next.latitude.toFixed(4)}:${next.longitude.toFixed(4)}:${next.zoom ?? ""}:${next.nonce ?? ""}` : "";
+        if (!key || key === lastFocusKey.current) {
+          return;
+        }
+        lastFocusKey.current = key;
+        applyFocus(next!);
+      }
+
+      let lastMarkerKey = "";
+      function maybeRebuild() {
+        const key = `${markersRef.current.map((item) => item.id).join(",")}|${selectedRef.current}|${Math.round(distance.current * 10)}`;
+        if (key !== lastMarkerKey) {
+          lastMarkerKey = key;
+          rebuildMarkers();
+        }
+      }
+
+      const lastAnchor = { x: -999, y: -999, visible: false, missing: true };
+      const tick = (now: number) => {
+        if (disposed) {
+          return;
+        }
+        consumeFocus();
+        maybeRebuild();
+        if (focusAnim.active) {
+          const t = Math.min(1, (now - focusAnim.t0) / 1100);
+          const e = 1 - (1 - t) ** 3;
+          camera.position.lerpVectors(focusAnim.from, focusAnim.to, e);
+          camera.up.set(0, 1, 0);
+          camera.lookAt(0, 0, 0);
+          distance.current = camera.position.length();
+          onZoomRef.current?.(distance.current);
+          if (t >= 1) {
+            focusAnim.active = false;
+          }
+        } else if (idleRef.current && !pauseRef.current && !pointer.dragging && !reducedRef.current) {
+          earth.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), 0.00115);
+        }
+        renderer?.render(scene, camera);
+        const anchor = projectSelected();
+        const changed =
+          !anchor
+            ? !lastAnchor.missing
+            : lastAnchor.missing ||
+              lastAnchor.visible !== anchor.visible ||
+              Math.abs(anchor.x - lastAnchor.x) > 1.5 ||
+              Math.abs(anchor.y - lastAnchor.y) > 1.5;
+        if (changed) {
+          if (anchor) {
+            lastAnchor.x = anchor.x;
+            lastAnchor.y = anchor.y;
+            lastAnchor.visible = anchor.visible;
+            lastAnchor.missing = false;
+          } else {
+            lastAnchor.missing = true;
+          }
+          onAnchorRef.current?.(anchor);
+        }
+        frame = requestAnimationFrame(tick);
+      };
+
+      const onPointerDown = (event: PointerEvent) => {
+        pointer.dragging = true;
+        pointer.moved = false;
+        pointer.lastX = event.clientX;
+        pointer.lastY = event.clientY;
+        root.setPointerCapture(event.pointerId);
+      };
+      const onPointerMove = (event: PointerEvent) => {
+        if (!pointer.dragging) {
+          return;
+        }
+        const dx = event.clientX - pointer.lastX;
+        const dy = event.clientY - pointer.lastY;
+        if (Math.hypot(dx, dy) > 3) {
+          pointer.moved = true;
+        }
+        pointer.lastX = event.clientX;
+        pointer.lastY = event.clientY;
+        earth.rotateOnWorldAxis(new THREE.Vector3(0, 1, 0), dx * 0.005);
+        earth.rotateOnWorldAxis(new THREE.Vector3(1, 0, 0), dy * 0.0035);
+      };
+      const raycaster = new THREE.Raycaster();
+      const ndc = new THREE.Vector2();
+      const onPointerUp = (event: PointerEvent) => {
+        const dragged = pointer.moved;
+        pointer.dragging = false;
+        if (dragged || !renderer) {
+          return;
+        }
+        const rect = root.getBoundingClientRect();
+        ndc.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        ndc.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(ndc, camera);
+        const hits = raycaster.intersectObjects(markerMeshes.map((item) => item.mesh));
+        const hit = hits[0];
+        if (!hit) {
+          return;
+        }
+        const found = markerMeshes.find((item) => item.mesh === hit.object);
+        if (found) {
+          onSelectRef.current(found.id);
+        }
+      };
+      const onWheel = (event: WheelEvent) => {
+        event.preventDefault();
+        distance.current = Math.max(2.15, Math.min(5.2, distance.current + event.deltaY * 0.0022));
+        camera.position.setLength(distance.current);
+        camera.lookAt(0, 0, 0);
+        onZoomRef.current?.(distance.current);
+      };
+
+      root.addEventListener("pointerdown", onPointerDown);
+      root.addEventListener("pointermove", onPointerMove);
+      root.addEventListener("pointerup", onPointerUp);
+      root.addEventListener("pointercancel", onPointerUp);
+      root.addEventListener("wheel", onWheel, { passive: false });
+      const observer = new ResizeObserver(resize);
+      observer.observe(wrap);
+      resize();
+      rebuildMarkers();
+      consumeFocus();
+      frame = requestAnimationFrame(tick);
+
+      (wrap as HTMLDivElement & { __cleanup?: () => void }).__cleanup = () => {
+        root.removeEventListener("pointerdown", onPointerDown);
+        root.removeEventListener("pointermove", onPointerMove);
+        root.removeEventListener("pointerup", onPointerUp);
+        root.removeEventListener("pointercancel", onPointerUp);
+        root.removeEventListener("wheel", onWheel);
+        observer.disconnect();
+        geometry.dispose();
+        material.dispose();
+        texture.dispose();
+        atmosphere.geometry.dispose();
+        (atmosphere.material as import("three").Material).dispose();
+      };
+    })();
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(frame);
+      const extra = (wrap as HTMLDivElement & { __cleanup?: () => void }).__cleanup;
+      extra?.();
+      if (renderer) {
+        renderer.dispose();
+        renderer.domElement.remove();
+      }
+    };
+  }, [size]);
+
+  const heightClass =
+    size === "hero"
+      ? "h-[15rem] w-full sm:h-[18rem] lg:h-[22rem]"
+      : "h-[22rem] w-full sm:h-[28rem] lg:h-[38rem]";
 
   return (
     <div
       ref={wrapRef}
-      className="relative h-[18rem] w-full touch-none overflow-hidden rounded-2xl border border-geo/25 bg-geo-soft sm:h-[24rem] lg:h-[32rem]"
+      className={`relative overflow-hidden rounded-2xl bg-[#070b12] ${heightClass}`}
       role="img"
       aria-labelledby={labelId}
-      onClick={(event) => {
-        const id = hitTest(event.clientX, event.clientY);
-        if (id) {
-          onSelect(id);
-        }
-      }}
     >
       <p id={labelId} className="sr-only">
-        Rotatable globe of Firsthand activity. Use the activity list for keyboard access.
+        3D globe of Earth with Firsthand activity. Search a place or use the activity list for keyboard access.
       </p>
-      <canvas ref={canvasRef} className="h-full w-full cursor-grab active:cursor-grabbing" />
     </div>
   );
+}
+
+function densify(markers: GlobeActivityMarker[], distance: number, selectedId?: string | null) {
+  const pinned = markers.filter((item) => item.id === selectedId || item.id === SEARCH_PLACE_MARKER_ID);
+  if (distance < 3.2 || markers.length <= 20) {
+    const rest = markers.filter((item) => !pinned.some((pin) => pin.id === item.id));
+    return [...pinned, ...rest].slice(0, 40);
+  }
+  const buckets = new Map<string, GlobeActivityMarker>();
+  const rank = { live: 0, wanted: 1, report: 2 };
+  for (const marker of markers) {
+    if (pinned.some((pin) => pin.id === marker.id)) {
+      continue;
+    }
+    const key = `${Math.round(marker.latitude / 12)}:${Math.round(marker.longitude / 12)}`;
+    const existing = buckets.get(key);
+    if (!existing || rank[marker.kind] < rank[existing.kind]) {
+      buckets.set(key, marker);
+    }
+  }
+  return [...pinned, ...buckets.values()].slice(0, 22);
 }

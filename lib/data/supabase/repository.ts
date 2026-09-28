@@ -35,7 +35,8 @@ import {
 import { homepageCoverageWanted } from "@/lib/coverage-wanted";
 import { activeEventSummaries, toEventSummary } from "@/lib/data/events";
 import { findGeoFollowLocation, geoFollowInsertFields, geoFollowSlugBase } from "@/lib/data/geo-follow";
-import { assembleFollowingFeed, type FollowingFeedItem, type GeoFollowTarget } from "@/lib/follows";
+import { type GeoFollowTarget } from "@/lib/follows";
+import { assembleYourWorldFeed, type YourWorldItem } from "@/lib/your-world";
 import { citySlug } from "@/lib/geo";
 import { assertEventAttachable } from "@/lib/events";
 import type { EventPageData, EventReporter, EventSummary } from "@/lib/types";
@@ -938,10 +939,13 @@ async function supabaseAssembleProfile(profile: NonNullable<Awaited<ReturnType<t
 
   const extras = await loadReputationCounts(profile.id, reports.map((item) => item.id));
   const streams = await supabaseListPublicLiveStreams({ reporterId: profile.id, includeEnded: true });
+  const { supabaseListPublicInvestigationsForReporter } = await import("@/lib/data/supabase/investigation-repository");
+  const investigations = await supabaseListPublicInvestigationsForReporter(profile.id);
   return assembleReporterProfilePage(profile, reports, locationsById, {
     ...extras,
     liveNow: streams.filter((item) => item.status === "live"),
     pastLive: streams.filter((item) => item.status === "ended"),
+    investigations,
   });
 }
 
@@ -1351,38 +1355,82 @@ export async function supabaseUnfollowLocation(userId: string, target: GeoFollow
   }
 }
 
-export async function supabaseGetFollowingFeed(userId: string): Promise<FollowingFeedItem[]> {
+export async function supabaseIsFollowingInvestigation(userId: string, investigationId: string) {
   const supabase = await createClient();
-  const [{ data: reporterFollows }, { data: locationFollowRows }, { data: reportRows }, { data: requestRows }] =
-    await Promise.all([
-      supabase.from("profile_follows").select("following_id").eq("follower_id", userId),
-      supabase.from("location_follows").select("location_id").eq("user_id", userId),
-      supabase
-        .from("reports")
-        .select(
-          `${REPORT_FEED_SELECT}, created_by`,
-        )
-        .is("removed_at", null)
-        .eq("publish_status", "published")
-        .order("uploaded_at", { ascending: false })
-        .limit(200),
-      supabase
-        .from("coverage_requests")
-        .select("id, title, description, created_at, status, created_by, location_id, locations(*), request_interests(id, user_id)")
-        .is("removed_at", null)
-        .order("created_at", { ascending: false })
-        .limit(200),
-    ]);
+  const { data } = await supabase
+    .from("investigation_follows")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("investigation_id", investigationId)
+    .maybeSingle();
+  return Boolean(data);
+}
 
-  const followLocationIds = [...new Set((locationFollowRows ?? []).map((item) => item.location_id))];
-  const { data: followedLocationRows } = followLocationIds.length
-    ? await supabase.from("locations").select("*").in("id", followLocationIds)
+export async function supabaseFollowInvestigation(userId: string, investigationId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("investigation_follows").insert({
+    user_id: userId,
+    investigation_id: investigationId,
+  });
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabaseUnfollowInvestigation(userId: string, investigationId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("investigation_follows")
+    .delete()
+    .eq("user_id", userId)
+    .eq("investigation_id", investigationId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+export async function supabaseGetFollowingFeed(
+  userId: string,
+  before?: string | null,
+  excludeReportIds?: Iterable<string>,
+): Promise<{ items: YourWorldItem[]; hasMore: boolean }> {
+  const supabase = await createClient();
+  const graph = await supabaseGetFollowGraph(userId);
+  const { data: reportRows } = await supabase
+    .from("reports")
+    .select(`${REPORT_FEED_SELECT}, created_by`)
+    .is("removed_at", null)
+    .eq("publish_status", "published")
+    .order("uploaded_at", { ascending: false })
+    .limit(200);
+
+  const reportIds = ((reportRows ?? []) as Array<ReportJoinRow & { created_by: string }>).map((row) => row.id);
+  const { data: itemRows } = reportIds.length
+    ? await supabase
+        .from("investigation_items")
+        .select("investigation_id, report_id, position, investigations(id, title, slug, status, removed_at, reporter_id, profiles(username))")
+        .in("report_id", reportIds)
     : { data: [] };
 
-  const followedReporterIds = new Set((reporterFollows ?? []).map((item) => item.following_id));
-  const followedLocations = (followedLocationRows ?? []).map(toLocationSummary);
+  const investigationByReport = new Map<
+    string,
+    { investigationId: string; title: string; href: string; position: number }
+  >();
+  for (const row of itemRows ?? []) {
+    const investigation = Array.isArray(row.investigations) ? row.investigations[0] : row.investigations;
+    if (!investigation || investigation.removed_at || investigation.status !== "published" || !row.report_id) {
+      continue;
+    }
+    const profile = Array.isArray(investigation.profiles) ? investigation.profiles[0] : investigation.profiles;
+    investigationByReport.set(row.report_id, {
+      investigationId: investigation.id,
+      title: investigation.title,
+      href: `/u/${profile?.username ?? "reporter"}/investigations/${investigation.slug}`,
+      position: row.position,
+    });
+  }
 
-  const reports = ((reportRows ?? []) as Array<ReportJoinRow & { created_by: string }>).flatMap((row) => {
+  const rows = ((reportRows ?? []) as Array<ReportJoinRow & { created_by: string }>).flatMap((row) => {
     const location = one(row.locations);
     if (!location) {
       return [];
@@ -1392,44 +1440,46 @@ export async function supabaseGetFollowingFeed(userId: string): Promise<Followin
         report: toReport(row),
         createdBy: row.created_by,
         location: toLocationSummary(location),
+        investigation: investigationByReport.get(row.id) ?? null,
       },
     ];
   });
 
-  const requests = ((requestRows ?? []) as RequestJoinRow[]).flatMap((row) => {
-    const location = one(row.locations);
-    if (!location) {
-      return [];
-    }
-    return [
-      {
-        request: toCoverageRequest(row, userId),
-        location: toLocationSummary(location),
-      },
-    ];
-  });
-
-  return assembleFollowingFeed({
-    followedReporterIds,
-    followedLocations,
-    reports,
-    requests,
+  return assembleYourWorldFeed({
+    followedReporterIds: new Set(graph.reporterIds),
+    followedLocations: graph.locations,
+    followedInvestigationIds: new Set(graph.investigationIds),
+    rows,
+    before,
+    excludeReportIds: excludeReportIds ? new Set(excludeReportIds) : undefined,
   });
 }
 
 export async function supabaseGetFollowGraph(userId: string) {
   const supabase = await createClient();
-  const [{ data: reporterFollows }, { data: locationFollowRows }] = await Promise.all([
+  const [{ data: reporterFollows }, { data: locationFollowRows }, { data: investigationFollowRows }] = await Promise.all([
     supabase.from("profile_follows").select("following_id").eq("follower_id", userId),
     supabase.from("location_follows").select("location_id").eq("user_id", userId),
+    supabase.from("investigation_follows").select("investigation_id").eq("user_id", userId),
   ]);
   const followLocationIds = [...new Set((locationFollowRows ?? []).map((item) => item.location_id))];
-  const { data: followedLocationRows } = followLocationIds.length
-    ? await supabase.from("locations").select("*").in("id", followLocationIds)
-    : { data: [] };
+  const investigationIds = (investigationFollowRows ?? []).map((item) => item.investigation_id);
+  const [{ data: followedLocationRows }, { data: investigationItems }] = await Promise.all([
+    followLocationIds.length
+      ? supabase.from("locations").select("*").in("id", followLocationIds)
+      : Promise.resolve({ data: [] }),
+    investigationIds.length
+      ? supabase.from("investigation_items").select("live_stream_id, report_id").in("investigation_id", investigationIds)
+      : Promise.resolve({ data: [] }),
+  ]);
   return {
     reporterIds: (reporterFollows ?? []).map((item) => item.following_id),
     locations: (followedLocationRows ?? []).map(toLocationSummary),
+    investigationIds,
+    investigationLiveStreamIds: (investigationItems ?? []).flatMap((item) =>
+      item.live_stream_id ? [item.live_stream_id] : [],
+    ),
+    investigationReportIds: (investigationItems ?? []).flatMap((item) => (item.report_id ? [item.report_id] : [])),
   };
 }
 

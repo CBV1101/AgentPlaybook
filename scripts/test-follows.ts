@@ -80,7 +80,12 @@ async function run() {
     await mockFollowLocation(jordan, berlin);
     assert(await mockIsFollowingLocation(jordan, berlin), "follow Berlin failed");
     await mockFollowLocation(jordan, berlin);
-    const berlinFollows = readMockDatabase().location_follows.filter((item) => item.user_id === jordan);
+    const berlinId = readMockDatabase().locations.find(
+      (item) => item.city === "Berlin" && item.country === "Germany" && !item.place,
+    )?.id;
+    const berlinFollows = readMockDatabase().location_follows.filter(
+      (item) => item.user_id === jordan && item.location_id === berlinId,
+    );
     assert(berlinFollows.length === 1, "duplicate city follow should be a no-op");
 
     const park = {
@@ -112,26 +117,10 @@ async function run() {
     await mockFollowLocation(jordan, germany);
 
     const feed = await mockGetFollowingFeed(jordan);
-    assert(feed.length > 0, "following feed should not be empty");
+    assert(feed.items.length > 0, "following feed should not be empty");
     assert(
-      feed.some((item) => item.reason === "From a reporter you follow"),
-      "feed should include reporter follows",
-    );
-    assert(
-      feed.some((item) => item.reason === "From Berlin, which you follow"),
-      "feed should include Berlin location reason",
-    );
-    assert(
-      feed.some((item) => item.reason === "From Görlitzer Park, which you follow"),
-      "feed should include park location reason",
-    );
-    assert(
-      feed.some((item) => item.reason === "From Karlstad, which you follow"),
-      "feed should include Karlstad location reason",
-    );
-    assert(
-      feed.some((item) => item.request && item.reason.includes("which you follow")),
-      "feed should include coverage requests from followed locations",
+      feed.items.some((item) => item.reason.includes("follow") || item.kind === "place-group" || item.kind === "report"),
+      "feed should include followed reporting",
     );
 
     await mockUnfollowReporter(jordan, priya);

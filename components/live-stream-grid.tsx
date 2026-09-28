@@ -16,6 +16,14 @@ function toCard(item: StreamInput) {
   return { stream: item };
 }
 
+/**
+ * Compact live discovery grid. Owns collection layout only.
+ * Presentation of each tile is CompactLiveStreamCard + LivePreview variant="grid".
+ * Do not reuse this class for globe Going On Now or the full live page player.
+ *
+ * Invariant at ~1600px viewport: .fh-live-section is ~1450–1520px wide;
+ * .fh-live-grid has 5 tracks; each .fh-live-tile is 250–310px; no horizontal overflow.
+ */
 export function LiveStreamGrid({
   streams,
   reports = [],
@@ -37,8 +45,8 @@ export function LiveStreamGrid({
   const extra = ranked.length > limit || reports.length > limit;
 
   return (
-    <div>
-      <div className="grid grid-cols-1 gap-x-6 gap-y-8 min-[600px]:grid-cols-2 min-[900px]:grid-cols-3 min-[1200px]:grid-cols-4 min-[1500px]:!grid-cols-5">
+    <>
+      <div className="fh-live-grid" data-live-grid="compact">
         {visibleStreams.map((item) => (
           <CompactLiveStreamCard key={item.stream.id} stream={item.stream} />
         ))}
@@ -53,6 +61,6 @@ export function LiveStreamGrid({
           </Link>
         </p>
       ) : null}
-    </div>
+    </>
   );
 }

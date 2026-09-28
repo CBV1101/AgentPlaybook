@@ -1,21 +1,24 @@
 import { AuthRequiredLink } from "@/components/auth-required-link";
-import { HeroGlobe } from "@/components/hero-globe";
+import { HomeGlobeExperience } from "@/components/home-globe";
 import { LocationSearch } from "@/components/location-search";
+import type { LiveStreamSummary } from "@/lib/live";
+import type { FirsthandReport } from "@/lib/types";
 
-export function HomeHero({ signedIn }: { signedIn: boolean }) {
+export function HomeHero({
+  signedIn,
+  liveStreams,
+  reports,
+}: {
+  signedIn: boolean;
+  liveStreams: LiveStreamSummary[];
+  reports: FirsthandReport[];
+}) {
   return (
     <section className="fh-hero-geo relative overflow-hidden rounded-2xl border border-geo/20 px-4 py-5 sm:px-8 sm:py-8">
       <div className="relative grid items-center lg:grid-cols-[minmax(0,1.2fr)_minmax(17rem,0.8fr)] lg:gap-12">
         <div className="relative z-10 max-w-2xl">
-          <div className="flex items-start gap-3 lg:block">
-            <div className="min-w-0 flex-1">
-              <p className="fh-kicker">Firsthand</p>
-              <h1 className="fh-slogan mt-2">The world, reported by you.</h1>
-            </div>
-            <div className="w-[5.75rem] shrink-0 sm:w-28 lg:hidden">
-              <HeroGlobe id="hero-mobile" />
-            </div>
-          </div>
+          <p className="fh-kicker">Firsthand</p>
+          <h1 className="fh-slogan mt-2">The world, reported by you.</h1>
           <p className="mt-3 text-sm leading-6 text-muted sm:text-base sm:leading-7">
             See what&apos;s happening around the world from the people who are actually there.
           </p>
@@ -38,8 +41,8 @@ export function HomeHero({ signedIn }: { signedIn: boolean }) {
             </AuthRequiredLink>
           </p>
         </div>
-        <div className="hidden lg:block">
-          <HeroGlobe id="hero-desktop" />
+        <div className="mt-6 min-w-0 lg:mt-0">
+          <HomeGlobeExperience liveStreams={liveStreams} reports={reports} />
         </div>
       </div>
     </section>

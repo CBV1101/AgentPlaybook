@@ -1,10 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { DiscoveryMap } from "@/components/discovery-map";
-import { LiveStreamCard } from "@/components/featured-live-stream";
-import { GLOBE_LOCAL_ZOOM, InteractiveGlobe, type GlobeFocus } from "@/components/interactive-globe";
-import { ReportCard } from "@/components/report-card";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { GoingOnNow } from "@/components/going-on-now";
+import { InteractiveGlobe, type GlobeAnchor, type GlobeFocus } from "@/components/interactive-globe";
+import { thumbnailPosition } from "@/lib/explore-popup";
 import { LocationLabel } from "@/components/ui/badge";
 import { buttonClass } from "@/components/ui/button";
 import { SearchInput } from "@/components/ui/field";
@@ -14,6 +13,9 @@ import type { DiscoveryPlace } from "@/lib/data/discovery";
 import type { LiveStreamSummary } from "@/lib/live";
 import type { FirsthandReport } from "@/lib/types";
 import type { GeocodeSuggestion } from "@/lib/location";
+import { selectRecentReportForLocation, normalizeCityName, type PlaceQuery } from "@/lib/live-for-location";
+import { canonicalPlaceFromSearch, SEARCH_PLACE_MARKER_ID, type CanonicalPlace } from "@/lib/globe-coords";
+import { useLocationLiveSession } from "@/components/use-location-live-session";
 import { cn } from "@/lib/cn";
 import Link from "next/link";
 
@@ -29,63 +31,216 @@ export function ExploreExperience({
   markers,
   liveStreams,
   reports,
-  places,
   usingShowcase,
 }: ExploreExperienceProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GeocodeSuggestion[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(markers[0]?.id ?? null);
+  const [selected, setSelected] = useState<CanonicalPlace | null>(null);
   const [focus, setFocus] = useState<GlobeFocus | null>(null);
-  const [zoom, setZoom] = useState(1.15);
+  const [popupOpen, setPopupOpen] = useState(false);
+  const [anchor, setAnchor] = useState<GlobeAnchor | null>(null);
   const [searching, setSearching] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const searchGen = useRef(0);
+  const selectGen = useRef(0);
+  const debounceRef = useRef<number>(0);
 
-  const selected = markers.find((item) => item.id === selectedId) ?? null;
-  const localMode = zoom >= GLOBE_LOCAL_ZOOM;
-  const lives = liveStreams.slice(0, 6);
-  const fallbackReports = reports.slice(0, 6);
+  const place: PlaceQuery | null = selected
+    ? {
+        city: selected.city,
+        country: selected.country,
+        latitude: selected.latitude,
+        longitude: selected.longitude,
+        scope: selected.scope,
+        boundingBox: selected.boundingBox,
+      }
+    : null;
+  const { streams, index, setIndex } = useLocationLiveSession(place, liveStreams);
+  const report = place && streams.length === 0 ? selectRecentReportForLocation(reports, place) : null;
 
-  async function searchLocation(term: string) {
+  const globeMarkers = useMemo(() => {
+    if (!selected) {
+      return markers;
+    }
+    const pin: GlobeActivityMarker = {
+      id: SEARCH_PLACE_MARKER_ID,
+      kind: "report",
+      latitude: selected.latitude,
+      longitude: selected.longitude,
+      city: selected.city,
+      country: selected.country,
+      title: selected.name,
+      href: "#",
+      subtitle: "SELECTED",
+    };
+    return [pin, ...markers.filter((item) => item.id !== SEARCH_PLACE_MARKER_ID)];
+  }, [markers, selected]);
+
+  const onGlobeAnchor = useCallback((next: GlobeAnchor | null) => {
+    setAnchor((prev) => {
+      if (next?.visible) {
+        return next;
+      }
+      if (popupOpen && prev?.visible) {
+        return {
+          ...prev,
+          wrapW: next?.wrapW ?? prev.wrapW,
+          wrapH: next?.wrapH ?? prev.wrapH,
+        };
+      }
+      return next;
+    });
+  }, [popupOpen]);
+
+  const flyTo = useCallback((next: CanonicalPlace) => {
+    setSelected(next);
+    setFocus({ latitude: next.latitude, longitude: next.longitude, zoom: 3.3, nonce: Date.now() });
+    setPopupOpen(true);
+    setSuggestionsOpen(false);
+  }, []);
+
+  const onSelectMarker = useCallback(
+    (id: string) => {
+      const marker = markers.find((item) => item.id === id);
+      if (!marker) {
+        return;
+      }
+      flyTo(
+        canonicalPlaceFromSearch({
+          city: marker.city,
+          country: marker.country,
+          name: `${marker.city}, ${marker.country}`,
+          latitude: marker.latitude,
+          longitude: marker.longitude,
+          scope: "city",
+        }),
+      );
+    },
+    [flyTo, markers],
+  );
+
+  function markerMatchesQuery(marker: GlobeActivityMarker, term: string) {
+    const q = term.trim().toLowerCase();
+    if (q.length < 2) {
+      return false;
+    }
+    const city = marker.city.toLowerCase();
+    const country = marker.country.toLowerCase();
+    return (
+      city.includes(q) ||
+      `${city}, ${country}`.includes(q) ||
+      normalizeCityName(marker.city) === normalizeCityName(term) ||
+      normalizeCityName(term).includes(normalizeCityName(marker.city))
+    );
+  }
+
+  const localMatches = useMemo(() => {
+    if (query.trim().length < 2) {
+      return [];
+    }
+    const rank = { live: 0, wanted: 1, report: 2 };
+    const byCity = new Map<string, GlobeActivityMarker>();
+    for (const item of markers) {
+      if (!markerMatchesQuery(item, query)) {
+        continue;
+      }
+      const key = `${item.city}|${item.country}`;
+      const existing = byCity.get(key);
+      if (!existing || rank[item.kind] < rank[existing.kind]) {
+        byCity.set(key, item);
+      }
+    }
+    return [...byCity.values()];
+  }, [markers, query]);
+
+  async function searchLocation(term: string): Promise<GeocodeSuggestion[]> {
     const trimmed = term.trim();
+    const gen = ++searchGen.current;
     if (trimmed.length < 2) {
       setResults([]);
-      return;
+      return [];
     }
     setSearching(true);
     try {
       const response = await fetch(`/api/geocode?q=${encodeURIComponent(trimmed)}`);
       const payload = (await response.json()) as { results?: GeocodeSuggestion[] };
-      setResults(payload.results ?? []);
+      if (gen !== searchGen.current) {
+        return [];
+      }
+      const next = payload.results ?? [];
+      setResults(next);
+      return next;
     } finally {
-      setSearching(false);
+      if (gen === searchGen.current) {
+        setSearching(false);
+      }
     }
   }
 
-  function flyTo(latitude: number, longitude: number, markerId?: string) {
-    setFocus({ latitude, longitude, zoom: 2.45 });
-    if (markerId) {
-      setSelectedId(markerId);
-    }
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    window.setTimeout(() => setZoom(GLOBE_LOCAL_ZOOM), reduced ? 0 : 720);
+  function scheduleSearch(term: string) {
+    window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      void searchLocation(term);
+    }, 280);
   }
 
   function chooseResult(result: GeocodeSuggestion) {
     setQuery(result.label);
     setResults([]);
-    const match = markers.find(
-      (item) =>
-        item.city.toLowerCase() === result.city.toLowerCase() &&
-        item.country.toLowerCase() === result.country.toLowerCase(),
+    flyTo(
+      canonicalPlaceFromSearch({
+        city: result.city || result.label.split(",")[0]!.trim(),
+        country: result.country || "",
+        name: result.label,
+        latitude: result.latitude,
+        longitude: result.longitude,
+        scope: result.scope,
+        boundingBox: result.boundingBox,
+      }),
     );
-    flyTo(result.latitude, result.longitude, match?.id);
   }
 
-  const mapPlaces = useMemo(() => {
-    if (!selected) {
-      return places;
+  async function lookUpPlace() {
+    const gen = ++selectGen.current;
+    const trimmed = query.trim();
+    let next = results;
+    if (next.length === 0) {
+      next = await searchLocation(trimmed);
     }
-    return places.filter((place) => place.city === selected.city && place.country === selected.country);
-  }, [places, selected]);
+    if (gen !== selectGen.current) {
+      return;
+    }
+    if (next[0]) {
+      chooseResult(next[0]);
+      return;
+    }
+    const local = localMatches[0];
+    if (local) {
+      flyTo(
+        canonicalPlaceFromSearch({
+          city: local.city,
+          country: local.country,
+          name: `${local.city}, ${local.country}`,
+          latitude: local.latitude,
+          longitude: local.longitude,
+          scope: "city",
+        }),
+      );
+    }
+  }
+
+  const selectedActivity = useMemo(() => {
+    if (!selected) {
+      return null;
+    }
+    return (
+      markers.find(
+        (item) =>
+          Math.abs(item.latitude - selected.latitude) < 0.08 &&
+          Math.abs(item.longitude - selected.longitude) < 0.08,
+      ) ?? null
+    );
+  }, [markers, selected]);
 
   return (
     <div>
@@ -93,12 +248,7 @@ export function ExploreExperience({
         className="mt-6 flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
-          const match = results[0];
-          if (match) {
-            chooseResult(match);
-            return;
-          }
-          void searchLocation(query);
+          void lookUpPlace();
         }}
       >
         <label className="sr-only" htmlFor="explore-search">
@@ -110,18 +260,53 @@ export function ExploreExperience({
           onChange={(event) => {
             const value = event.target.value;
             setQuery(value);
-            void searchLocation(value);
+            setSuggestionsOpen(true);
+            scheduleSearch(value);
           }}
-          placeholder="Berlin, Ceuta, Sendai…"
+          placeholder="New York City, Berlin, Nairobi…"
           className="mt-0 h-11 w-full"
         />
         <button type="submit" className={buttonClass("primary", "h-11 shrink-0")}>
           Look
         </button>
       </form>
-      {searching ? <p className="mt-2 fh-label">Finding that place…</p> : null}
-      {results.length > 0 ? (
+      {selected ? (
+        <span
+          hidden
+          data-canonical-place
+          data-city={selected.city}
+          data-country={selected.country}
+          data-latitude={String(selected.latitude)}
+          data-longitude={String(selected.longitude)}
+        />
+      ) : null}
+      {suggestionsOpen && (localMatches.length > 0 || results.length > 0) ? (
         <ul className="fh-menu mt-2 max-h-64 overflow-auto py-1" role="listbox">
+          {localMatches.slice(0, 4).map((marker) => (
+            <li key={`local-${marker.id}`}>
+              <button
+                type="button"
+                className="w-full px-3 py-3 text-left text-sm hover:bg-canvas"
+                onClick={() => {
+                  setQuery(`${marker.city}, ${marker.country}`);
+                  setResults([]);
+                  flyTo(
+                    canonicalPlaceFromSearch({
+                      city: marker.city,
+                      country: marker.country,
+                      name: `${marker.city}, ${marker.country}`,
+                      latitude: marker.latitude,
+                      longitude: marker.longitude,
+                      scope: "city",
+                    }),
+                  );
+                }}
+              >
+                <span className="block font-medium text-ink">{marker.city}, {marker.country}</span>
+                <span className="block fh-label">Firsthand activity here</span>
+              </button>
+            </li>
+          ))}
           {results.map((result) => (
             <li key={`${result.label}-${result.latitude}`}>
               <button
@@ -137,107 +322,44 @@ export function ExploreExperience({
         </ul>
       ) : null}
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(17rem,0.8fr)]">
-        <div>
-          {localMode ? (
-            <DiscoveryMap
-              places={mapPlaces.length ? mapPlaces : places}
-              caption="City view — coverage demand, live reports, and recent firsthand accounts."
-            />
-          ) : (
-            <InteractiveGlobe
-              markers={markers}
-              selectedId={selectedId}
-              focus={focus}
-              onSelect={setSelectedId}
-              onZoomChange={setZoom}
-            />
-          )}
-          {localMode ? (
-            <p className="mt-3">
-              <button
-                type="button"
-                className={buttonClass("secondary")}
-                onClick={() => {
-                  setZoom(1.15);
-                  setFocus(null);
-                }}
-              >
-                Back to world view
-              </button>
-            </p>
-          ) : null}
-          <p className="mt-2 fh-meta">
-            {localMode
-              ? "Zoomed to a conventional map. Return to world view to rotate the globe again."
-              : "Drag to rotate. Scroll to zoom toward a city. Activity list below is keyboard accessible."}
-          </p>
-          <ul className="mt-3 flex flex-wrap gap-4 text-xs text-muted">
-            <li><span className="mr-1 inline-block h-2 w-2 rounded-full bg-live" /> Live</li>
-            <li><span className="mr-1 inline-block h-2 w-2 rounded-full bg-earth" /> Coverage wanted</li>
-            <li><span className="mr-1 inline-block h-2 w-2 rounded-full bg-geo" /> Recent report</li>
-          </ul>
-        </div>
-
-        <div className="lg:fh-live-stage lg:rounded-2xl lg:p-4">
-          {lives.length > 0 ? (
-            <div>
-              <p className="fh-kicker text-live lg:text-[color:var(--color-live)]">Live around the world</p>
-              <h2 className="mt-1 fh-section lg:text-surface">What people are showing now</h2>
-              <div className="mt-4 hidden flex-col gap-4 lg:flex">
-                {lives.slice(0, 3).map((stream) => (
-                  <button
-                    key={stream.id}
-                    type="button"
-                    className="text-left"
-                    onClick={() =>
-                      flyTo(stream.location.latitude ?? 0, stream.location.longitude ?? 0, `live:${stream.id}`)
-                    }
-                  >
-                    <LiveStreamCard stream={stream} />
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div>
-              <p className="fh-kicker">Latest from around the world</p>
-              <h2 className="mt-1 fh-section lg:text-surface">No one is live right now</h2>
-              <p className="mt-2 fh-meta lg:text-surface/70">
-                {usingShowcase
-                  ? "Development showcase is off because this is a truthful empty live state."
-                  : "Recent published reports stay available. Live appears here only when someone is broadcasting."}
-              </p>
-            </div>
-          )}
-        </div>
+      <div className="relative mt-6">
+        <InteractiveGlobe
+          markers={globeMarkers}
+          selectedId={selected ? SEARCH_PLACE_MARKER_ID : null}
+          anchorLocation={selected}
+          focus={focus}
+          onSelect={onSelectMarker}
+          onAnchorChange={onGlobeAnchor}
+          pauseRotation={popupOpen}
+          idleRotate
+          size="explore"
+        />
+        {popupOpen && place ? <GeoAnchoredGoingOnNow
+          anchor={anchor}
+          city={place.city}
+          country={place.country}
+          streams={streams}
+          index={index}
+          report={report}
+          onClose={() => setPopupOpen(false)}
+          onIndexChange={setIndex}
+        /> : null}
+        <ul className="mt-3 flex flex-wrap gap-4 text-xs text-muted">
+          <li><span className="mr-1 inline-block h-2 w-2 rounded-full bg-live" /> Live now</li>
+          <li><span className="mr-1 inline-block h-2 w-2 rounded-full bg-earth" /> Coverage wanted</li>
+          <li><span className="mr-1 inline-block h-2 w-2 rounded-full bg-geo" /> Recent report</li>
+        </ul>
+        <p className="mt-2 fh-meta">
+          Drag to rotate Earth. Scroll to zoom. Search a city to fly there. Closing a stream keeps you looking at that place.
+        </p>
       </div>
 
-      {lives.length > 0 ? (
-        <div className="fh-live-stage -mx-4 mt-5 px-4 py-4 lg:hidden">
-          <div className="flex snap-x gap-3 overflow-x-auto pb-2">
-          {lives.map((stream) => (
-            <button
-              key={stream.id}
-              type="button"
-              className="text-left"
-              onClick={() => flyTo(stream.location.latitude ?? 0, stream.location.longitude ?? 0, `live:${stream.id}`)}
-            >
-              <LiveStreamCard stream={stream} compact />
-            </button>
-          ))}
-          </div>
-        </div>
-      ) : fallbackReports.length > 0 ? (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {fallbackReports.map((report) => (
-            <ReportCard key={report.id} report={report} />
-          ))}
-        </div>
+      {usingShowcase ? (
+        <p className="mt-3 text-xs text-geo">Development showcase streams are not stored in Supabase.</p>
       ) : null}
 
-      {selected ? (
-        <MarkerPreview marker={selected} className="mt-6" />
+      {selectedActivity && !popupOpen ? (
+        <MarkerPreview marker={selectedActivity} className="mt-6" />
       ) : null}
 
       <section className="mt-8">
@@ -250,9 +372,23 @@ export function ExploreExperience({
                 type="button"
                 className={cn(
                   "flex w-full items-start justify-between gap-4 py-3 text-left hover:bg-canvas fh-focus",
-                  selectedId === marker.id && "bg-geo-soft/60",
+                  selected &&
+                    Math.abs(marker.latitude - selected.latitude) < 0.08 &&
+                    Math.abs(marker.longitude - selected.longitude) < 0.08 &&
+                    "bg-geo-soft/60",
                 )}
-                onClick={() => flyTo(marker.latitude, marker.longitude, marker.id)}
+                onClick={() =>
+                  flyTo(
+                    canonicalPlaceFromSearch({
+                      city: marker.city,
+                      country: marker.country,
+                      name: `${marker.city}, ${marker.country}`,
+                      latitude: marker.latitude,
+                      longitude: marker.longitude,
+                      scope: "city",
+                    }),
+                  )
+                }
               >
                 <span>
                   <LocationLabel city={marker.city} country={marker.country} size="card" />
@@ -264,6 +400,49 @@ export function ExploreExperience({
           ))}
         </ul>
       </section>
+    </div>
+  );
+}
+
+function GeoAnchoredGoingOnNow({
+  anchor,
+  city,
+  country,
+  streams,
+  index,
+  report,
+  onClose,
+  onIndexChange,
+}: {
+  anchor: GlobeAnchor | null;
+  city: string;
+  country: string;
+  streams: LiveStreamSummary[];
+  index: number;
+  report?: FirsthandReport | null;
+  onClose: () => void;
+  onIndexChange: (next: number) => void;
+}) {
+  const pos = thumbnailPosition(anchor, typeof window !== "undefined" && window.innerWidth < 640 ? 236 : 260);
+  if (pos.hidden) {
+    return null;
+  }
+  return (
+    <div
+      className="pointer-events-auto absolute z-20"
+      data-explore-popup="geo"
+      data-popup-side={pos.side}
+      style={{ left: pos.left, top: pos.top, width: pos.width }}
+    >
+      <GoingOnNow
+        city={city}
+        country={country}
+        streams={streams}
+        index={index}
+        report={report}
+        onClose={onClose}
+        onIndexChange={onIndexChange}
+      />
     </div>
   );
 }

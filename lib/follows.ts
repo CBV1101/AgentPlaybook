@@ -19,10 +19,17 @@ export type GeoFollowTarget = {
 export type FollowGraph = {
   reporterIds: string[];
   locations: LocationSummary[];
+  investigationIds: string[];
+  investigationLiveStreamIds: string[];
+  investigationReportIds: string[];
 };
 
 export function followGraphIsEmpty(graph: FollowGraph) {
-  return graph.reporterIds.length === 0 && graph.locations.length === 0;
+  return (
+    graph.reporterIds.length === 0 &&
+    graph.locations.length === 0 &&
+    graph.investigationIds.length === 0
+  );
 }
 
 export type FollowingFeedItem = {
@@ -124,10 +131,16 @@ export function assembleFollowingFeed(input: {
 }
 
 export function liveMatchesFollows(
-  stream: { reporterId: string; location: LocationSummary; eventId?: string | null },
+  stream: { id: string; reporterId: string; location: LocationSummary; reportId?: string | null; eventId?: string | null },
   graph: FollowGraph,
 ) {
   if (graph.reporterIds.includes(stream.reporterId)) {
+    return true;
+  }
+  if (graph.investigationLiveStreamIds.includes(stream.id)) {
+    return true;
+  }
+  if (stream.reportId && graph.investigationReportIds.includes(stream.reportId)) {
     return true;
   }
   return graph.locations.some((followed) => Boolean(locationFollowMatch(followed, stream.location)));

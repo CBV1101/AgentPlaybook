@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { LivePlayer } from "@/components/live-player";
 import { ReportContentForm } from "@/components/report-content-form";
 import { SensitiveContentAdminControl } from "@/components/sensitive-content-admin-control";
@@ -20,6 +20,17 @@ type LivePageProps = {
 
 export default async function LivePage({ params, searchParams }: LivePageProps) {
   const { id } = await params;
+  if (process.env.NODE_ENV === "development" && id.startsWith("dev-showcase-")) {
+    const { getHomepageShowcaseContent } = await import("@/lib/homepage-showcase");
+    const { showcaseInvestigationPage } = await import("@/lib/investigation-showcase");
+    const stream =
+      getHomepageShowcaseContent().liveStreams.find((item) => item.id === id) ??
+      showcaseInvestigationPage().livePart?.liveStream ??
+      null;
+    if (stream?.reporterUsername) {
+      redirect(`/u/${stream.reporterUsername}`);
+    }
+  }
   const { notice, error } = await searchParams;
   const user = await getCurrentUser();
   const [stream, isAdmin] = await Promise.all([getLiveStreamPage(id, user?.id), currentUserIsAdmin()]);

@@ -14,8 +14,10 @@ import {
 import type { CoverageOpportunity } from "@/lib/coverage-opportunity";
 import { cityHref, citySlug } from "@/lib/geo";
 import type { CoverageRequest, FirsthandReport, LocationSummary } from "@/lib/types";
-import type { LiveStreamSummary } from "@/lib/live";
-import type { FollowingFeedItem } from "@/lib/follows";
+import { isActiveLiveStatus, type LiveStreamSummary } from "@/lib/live";
+import { assembleYourWorldFeed, type YourWorldItem } from "@/lib/your-world";
+import { showcaseInvestigationPage } from "@/lib/investigation-showcase";
+import { liveMatchesFollows, type FollowGraph } from "@/lib/follows";
 
 export { HOMEPAGE_SHOWCASE_ID_PREFIX, isHomepageShowcaseAllowed as isDiscoveryShowcaseAllowed };
 
@@ -192,40 +194,221 @@ export function applyExploreShowcase(input: {
 
 export function applyFollowingShowcase(input: {
   hasFollows: boolean;
-  feed: FollowingFeedItem[];
+  feed: YourWorldItem[];
   liveStreams: LiveStreamSummary[];
   reports: FirsthandReport[];
-  requests: CoverageRequest[];
-  places: DiscoveryPlace[];
+  before?: string | null;
 }) {
   if (!isHomepageShowcaseAllowed() || input.hasFollows) {
-    return { ...input, usingShowcase: false };
+    return { ...input, hasMore: false, usingShowcase: false };
   }
   if (input.feed.length > 0 || input.liveStreams.length > 0) {
-    return { ...input, usingShowcase: false };
+    return { ...input, hasMore: false, usingShowcase: false };
   }
   const showcase = discoveryShowcaseContent();
-  const feed: FollowingFeedItem[] = [
-    ...showcase.reports.map((report) => ({
-      id: `report:${report.id}`,
-      occurredAt: report.publishedAt,
-      reason: "Development showcase — not a follow you created",
+  const berlin = showcase.places.find((item) => item.city === "Berlin");
+  const berlinLocation: LocationSummary = berlin
+    ? { ...berlin, place: berlin.place ?? null }
+    : {
+        id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}loc-berlin`,
+        slug: "berlin-germany",
+        place: null,
+        city: "Berlin",
+        country: "Germany",
+        latitude: 52.52,
+        longitude: 13.405,
+        label: "Berlin, Germany",
+        href: cityHref("Berlin", "Germany"),
+      };
+  const now = Date.now();
+  const berlinReports: FirsthandReport[] = [
+    showcase.reports.find((item) => item.city === "Berlin") ??
+      showcase.reports[0]!,
+    {
+      ...(showcase.reports.find((item) => item.city === "Berlin") ?? showcase.reports[0]!),
+      id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}report-berlin-2`,
+      title: "Evening crowd at Alexanderplatz",
+      publishedAt: new Date(now - 28 * 60_000).toISOString(),
+      capturedAt: new Date(now - 30 * 60_000).toISOString(),
+      thumbnailUrl: "https://picsum.photos/seed/berlin-2/1200/800",
+      mediaUrl: showcase.reports[0]?.mediaUrl ?? null,
+      mediaKind: "video",
+    },
+    {
+      ...(showcase.reports.find((item) => item.city === "Berlin") ?? showcase.reports[0]!),
+      id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}report-berlin-3`,
+      title: "Bike lane after the demonstration",
+      publishedAt: new Date(now - 46 * 60_000).toISOString(),
+      capturedAt: new Date(now - 50 * 60_000).toISOString(),
+      thumbnailUrl: "https://picsum.photos/seed/berlin-3/1200/800",
+      mediaUrl: showcase.reports[0]?.mediaUrl ?? null,
+      mediaKind: "video",
+    },
+  ];
+  const investigation = showcaseInvestigationPage();
+  const reporterId = investigation.investigation.reporterId;
+  const partSix = investigation.parts.find((part) => part.position === 6)?.report;
+  const partSeven = investigation.parts.find((part) => part.position === 7)?.report;
+  const partEight = investigation.parts.find((part) => part.position === 8)?.report;
+  const followGraph: FollowGraph = {
+    reporterIds: [reporterId],
+    locations: [berlinLocation],
+    investigationIds: [investigation.investigation.id],
+    investigationLiveStreamIds: investigation.parts.flatMap((part) =>
+      part.liveStream ? [part.liveStream.id] : [],
+    ),
+    investigationReportIds: investigation.parts.flatMap((part) => (part.report ? [part.report.id] : [])),
+  };
+  const liveStreams = [...showcase.liveStreams, ...investigation.parts.flatMap((part) => (part.liveStream ? [part.liveStream] : []))]
+    .filter((item, index, all) => all.findIndex((row) => row.id === item.id) === index)
+    .filter((item) => isActiveLiveStatus(item.status) && liveMatchesFollows(item, followGraph));
+  const liveReportIds = new Set(liveStreams.flatMap((item) => (item.reportId ? [item.reportId] : [])));
+  const reporterReport: FirsthandReport = {
+    ...(showcase.reports.find((item) => item.city === "New York") ?? showcase.reports[0]!),
+    id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}report-amorgan-midtown`,
+    title: "Reporting from Midtown Manhattan",
+    excerpt: "Crossing at a Midtown intersection in late afternoon light.",
+    city: "New York",
+    country: "United States",
+    location: "New York, United States",
+    reporterName: investigation.investigation.reporterName,
+    reporterUsername: "amorgan",
+    publishedAt: new Date(now - 52 * 60_000).toISOString(),
+    capturedAt: new Date(now - 52 * 60_000).toISOString(),
+    mediaKind: "video",
+    mediaUrl: showcase.reports[0]?.mediaUrl ?? null,
+    thumbnailUrl: "https://picsum.photos/seed/midtown-follow/1200/800",
+    locationHref: cityHref("New York", "United States"),
+  };
+  const rows = [
+    ...berlinReports.map((report) => ({
       report,
+      createdBy: `${HOMEPAGE_SHOWCASE_ID_PREFIX}user-jonas-w`,
+      location: berlinLocation,
+      investigation: null,
     })),
-    ...showcase.requests.slice(0, 4).map((request) => ({
-      id: `request:${request.id}`,
-      occurredAt: request.createdAt,
-      reason: "Development showcase — not a follow you created",
-      request,
-    })),
-  ].sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+    {
+      report: reporterReport,
+      createdBy: reporterId,
+      location: {
+        id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}loc-new-york`,
+        slug: "new-york-united-states",
+        place: null,
+        city: "New York",
+        country: "United States",
+        latitude: 40.7128,
+        longitude: -74.006,
+        label: "New York, United States",
+        href: cityHref("New York", "United States"),
+      },
+      investigation: null,
+    },
+    ...(partSeven
+      ? [
+          {
+            report: {
+              ...partSeven,
+              publishedAt: new Date(now - 18 * 60_000).toISOString(),
+              capturedAt: new Date(now - 18 * 60_000).toISOString(),
+              excerpt: "Visited another location connected to the public records trail.",
+              mediaUrl: partSeven.mediaUrl ?? partSeven.thumbnailUrl ?? null,
+            },
+            createdBy: reporterId,
+            location: {
+              id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}loc-mankato`,
+              slug: "mankato-united-states",
+              place: null,
+              city: "Mankato",
+              country: "United States",
+              latitude: 44.1636,
+              longitude: -93.9994,
+              label: "Mankato, United States",
+              href: cityHref("Mankato", "United States"),
+            },
+            investigation: {
+              investigationId: investigation.investigation.id,
+              title: investigation.investigation.title,
+              href: investigation.investigation.href,
+              position: 7,
+            },
+          },
+        ]
+      : []),
+    ...(partEight
+      ? [
+          {
+            report: {
+              ...partEight,
+              id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}report-part8-berlin`,
+              city: "Berlin",
+              country: "Germany",
+              location: "Berlin, Germany",
+              publishedAt: new Date(now - 8 * 60 * 60_000).toISOString(),
+              capturedAt: new Date(now - 8 * 60 * 60_000).toISOString(),
+              excerpt: "Neighborhood follow-up from Berlin, filed as the next investigation part.",
+              locationHref: cityHref("Berlin", "Germany"),
+            },
+            createdBy: reporterId,
+            location: berlinLocation,
+            investigation: {
+              investigationId: investigation.investigation.id,
+              title: investigation.investigation.title,
+              href: investigation.investigation.href,
+              position: 8,
+            },
+          },
+        ]
+      : []),
+    ...(partSix
+      ? [
+          {
+            report: {
+              ...partSix,
+              publishedAt: new Date(now - 20 * 60 * 60_000).toISOString(),
+              capturedAt: new Date(now - 20 * 60 * 60_000).toISOString(),
+            },
+            createdBy: reporterId,
+            location: {
+              id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}loc-mankato-older`,
+              slug: "mankato-united-states",
+              place: null,
+              city: "Mankato",
+              country: "United States",
+              latitude: 44.1636,
+              longitude: -93.9994,
+              label: "Mankato, United States",
+              href: cityHref("Mankato", "United States"),
+            },
+            investigation: {
+              investigationId: investigation.investigation.id,
+              title: investigation.investigation.title,
+              href: investigation.investigation.href,
+              position: 6,
+            },
+          },
+        ]
+      : []),
+  ];
+  const world = assembleYourWorldFeed({
+    followedReporterIds: new Set([reporterId]),
+    followedLocations: [berlinLocation],
+    followedInvestigationIds: new Set([investigation.investigation.id]),
+    rows,
+    before: input.before,
+    excludeReportIds: liveReportIds,
+  });
   return {
     hasFollows: false,
-    feed,
-    liveStreams: showcase.liveStreams,
-    reports: showcase.reports,
-    requests: showcase.requests,
-    places: showcase.places,
+    feed: world.items,
+    liveStreams,
+    reports: [
+      ...berlinReports,
+      reporterReport,
+      ...(partSeven ? [partSeven] : []),
+      ...(partEight ? [partEight] : []),
+      ...(partSix ? [partSix] : []),
+    ],
+    hasMore: world.hasMore,
     usingShowcase: true,
   };
 }

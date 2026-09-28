@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Badge, LiveBadge } from "@/components/ui/badge";
-import { liveHref, liveStatusLabel, type LiveStreamSummary } from "@/lib/live";
+import { liveHref, liveStatusLabel, reporterProfileHref, type LiveStreamSummary } from "@/lib/live";
 import { formatWhen } from "@/lib/format";
 import { cn } from "@/lib/cn";
 
@@ -12,12 +12,12 @@ export function LiveCard({
   featured?: boolean;
 }) {
   const live = stream.status === "live";
-  const href = liveHref(stream.id);
+  const href = reporterProfileHref(stream.reporterUsername) ?? liveHref(stream.id);
   const preview = stream.thumbnailUrl;
 
   return (
     <article className="fh-content-card">
-      <Link href={href} className="relative block bg-ink" aria-label={stream.title}>
+      <Link href={href} className="relative block bg-ink" aria-label={`${stream.reporterName} reporter profile`}>
         {preview ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img

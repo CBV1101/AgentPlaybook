@@ -18,6 +18,8 @@
 
 import type { DiscoveryPlace } from "@/lib/data/discovery";
 import type { CityBrowse } from "@/lib/data/geography";
+import { assembleReporterProfilePage, type ReporterProfilePage } from "@/lib/data/reporter";
+import type { Profile } from "@/lib/database.types";
 import { cityHref, citySlug, countrySlug } from "@/lib/geo";
 import { MOCK_LIVE_SAMPLE_VIDEO, type LiveStreamSummary } from "@/lib/live";
 import type { CoverageRequest, EventSummary, FirsthandReport, LocationSummary } from "@/lib/types";
@@ -42,6 +44,12 @@ export function isHomepageShowcaseAllowed() {
   return process.env.NODE_ENV === "development";
 }
 
+export const MIN_DEV_LIVE_GRID_STREAMS = 6;
+
+export function countLiveNow(streams: LiveStreamSummary[]) {
+  return streams.filter((item) => item.status === "live").length;
+}
+
 export function homepageHasMeaningfulActivity(input: {
   liveStreams: LiveStreamSummary[];
   requests: CoverageRequest[];
@@ -49,7 +57,7 @@ export function homepageHasMeaningfulActivity(input: {
   cities: CityBrowse[];
 }) {
   return (
-    input.liveStreams.some((item) => item.status === "live") ||
+    countLiveNow(input.liveStreams) >= MIN_DEV_LIVE_GRID_STREAMS ||
     input.requests.length > 0 ||
     input.reports.length > 0 ||
     input.cities.some((city) => city.liveCount + city.reportCount + city.openRequestCount > 0)
@@ -67,11 +75,18 @@ export function applyHomepageShowcase(input: {
   if (!isHomepageShowcaseAllowed()) {
     return { ...input, usingShowcase: false };
   }
-  if (homepageHasMeaningfulActivity(input)) {
+  const showcase = buildHomepageShowcase();
+  const liveCount = countLiveNow(input.liveStreams);
+  if (liveCount >= MIN_DEV_LIVE_GRID_STREAMS) {
     return { ...input, usingShowcase: false };
   }
   return {
-    ...buildHomepageShowcase(),
+    liveStreams: showcase.liveStreams,
+    requests: input.requests.length > 0 ? input.requests : showcase.requests,
+    reports: input.reports.length > 0 ? input.reports : showcase.reports,
+    places: input.places.length > 0 ? input.places : showcase.places,
+    events: input.events.length > 0 ? input.events : showcase.events,
+    cities: input.cities.length > 0 ? input.cities : showcase.cities,
     usingShowcase: true,
   };
 }
@@ -104,12 +119,26 @@ function buildHomepageShowcase(): Omit<HomepagePresentation, "usingShowcase"> {
     request("madrid", madrid, "What does Puerta del Sol look like this evening?", 64, now, 15),
   ];
 
+  const manhattan = place("Manhattan", "United States", 40.7831, -73.9712);
+  const brooklyn = place("Brooklyn", "United States", 40.6782, -73.9442);
+  const queens = place("Queens", "United States", 40.7282, -73.7949);
+  const bronx = place("Bronx", "United States", 40.8448, -73.8648);
+  const statenIsland = place("Staten Island", "United States", 40.5795, -74.1502);
+
   const liveStreams: LiveStreamSummary[] = [
-    live(berlin, "Demonstration outside Hauptbahnhof", "lena-k", "Lena Krüger", 18, requests[0]!.id),
-    live(nairobi, "Morning paths in Uhuru Park", "daniel-o", "Daniel Otieno", 12, requests[2]!.id),
-    live(newYork, "Lunch crowd at Union Square", "priya-n", "Priya Nair", 27, requests[3]!.id),
-    live(stockholm, "Afternoon on Sergels torg", "maja-s", "Maja Söderberg", 41, requests[5]!.id),
-    live(paris, "Outside Gare du Nord", "camille-l", "Camille Laurent", 7, requests[1]!.id),
+    live(berlin, "Demonstration outside Hauptbahnhof", "lena-k", "Lena Krüger", 18, requests[0]!.id, 88),
+    live(nairobi, "Morning paths in Uhuru Park", "daniel-o", "Daniel Otieno", 12, requests[2]!.id, 41),
+    live(newYork, "Times Square crossing", "maya-c", "Maya Chen", 8, requests[3]!.id, 1842, "nyc-times-square"),
+    live(manhattan, "Sidewalk along Central Park South", "noah-b", "Noah Brennan", 11, null, 1200, "nyc-manhattan"),
+    live(newYork, "Lunch crowd at Union Square", "priya-n", "Priya Nair", 27, requests[3]!.id, 921, "nyc-union-square"),
+    live(brooklyn, "Atlantic Terminal sidewalk", "luis-r", "Luis Romero", 19, null, 403, "nyc-brooklyn"),
+    live(bronx, "Grand Concourse afternoon", "sofia-m", "Sofia Morales", 24, null, 210, "nyc-bronx"),
+    live(queens, "Flushing Meadows paths", "hana-k", "Hana Kim", 36, null, 87, "nyc-queens"),
+    live(statenIsland, "St. George ferry terminal", "owen-t", "Owen Trent", 44, null, 54, "nyc-staten"),
+    live(stockholm, "Afternoon on Sergels torg", "maja-s", "Maja Söderberg", 41, requests[5]!.id, 63),
+    live(paris, "Outside Gare du Nord", "camille-l", "Camille Laurent", 7, requests[1]!.id, 640, "paris-gare"),
+    live(paris, "Canal Saint-Martin towpath", "luc-m", "Luc Moreau", 16, null, 310, "paris-canal"),
+    live(paris, "Steps at the hill overlook", "elise-d", "Elise Durand", 29, null, 155, "paris-hill"),
     live(seoul, "Evening at Gwanghwamun Square", "jiwon-p", "Ji-won Park", 22, requests[4]!.id),
     live(saoPaulo, "Midday at Praça da Sé", "rafa-m", "Rafael Mendes", 9, requests[6]!.id),
     live(madrid, "Evening at Puerta del Sol", "ines-r", "Inés Romero", 33, requests[7]!.id),
@@ -202,9 +231,11 @@ function live(
   reporterName: string,
   minutesAgo: number,
   requestId: string | null,
+  viewerCount: number | null = null,
+  idKey?: string,
 ): LiveStreamSummary {
   const startedAt = new Date(Date.now() - minutesAgo * 60_000).toISOString();
-  const seed = location.city.toLowerCase().replace(/\s+/g, "-");
+  const seed = idKey ?? location.city.toLowerCase().replace(/\s+/g, "-");
   return {
     id: `${HOMEPAGE_SHOWCASE_ID_PREFIX}live-${seed}`,
     title,
@@ -225,6 +256,7 @@ function live(
     thumbnailUrl: `https://picsum.photos/seed/${seed}-live/1200/750`,
     sensitiveContent: false,
     recordingAssetId: null,
+    viewerCount,
   };
 }
 
@@ -255,6 +287,7 @@ function report(
     reporterName,
     reporterUsername: username,
     thumbnailUrl: `https://picsum.photos/seed/${key}-report/1200/800`,
+    mediaUrl: video ? MOCK_LIVE_SAMPLE_VIDEO : null,
     respondsToRequest: false,
   };
 }
@@ -276,4 +309,52 @@ function cityRow(
     latitude: location.latitude,
     longitude: location.longitude,
   };
+}
+
+export function applyHomepageLiveReporterShowcase(
+  username: string,
+  real: ReporterProfilePage | null,
+): ReporterProfilePage | null {
+  if (!isHomepageShowcaseAllowed()) {
+    return real;
+  }
+  const content = getHomepageShowcaseContent();
+  const streams = content.liveStreams.filter((item) => item.reporterUsername === username);
+  const reports = content.reports.filter((item) => item.reporterUsername === username);
+  if (streams.length === 0 && reports.length === 0) {
+    return real;
+  }
+  if (real?.liveNow.length) {
+    return real;
+  }
+  if (!real && process.env.NODE_ENV === "development") {
+    console.warn(`[firsthand] Development showcase reporter profile for @${username}. Not stored in Supabase.`);
+  }
+  const seed = streams[0];
+  const profile: Profile = real?.profile ?? {
+    id: seed?.reporterId ?? `${HOMEPAGE_SHOWCASE_ID_PREFIX}user-${username}`,
+    username,
+    display_name: seed?.reporterName ?? username,
+    bio: "Fictional development showcase reporter. Not a real person on Firsthand.",
+    avatar_url: null,
+    home_city: seed?.location.city ?? null,
+    home_country: seed?.location.country ?? null,
+    created_at: new Date().toISOString(),
+    role: "member",
+    can_live_stream: true,
+    topics: [],
+  };
+  const liveNow = streams.filter((item) => item.status === "live");
+  if (real) {
+    return {
+      ...real,
+      liveNow,
+      latestReports: real.latestReports.length > 0 ? real.latestReports : reports,
+    };
+  }
+  return assembleReporterProfilePage(profile, reports, new Map(), {
+    liveNow,
+    pastLive: [],
+    investigations: [],
+  });
 }

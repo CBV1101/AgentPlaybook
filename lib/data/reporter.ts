@@ -12,9 +12,10 @@ export type ReporterProfilePage = {
   placesCovered: PlaceCovered[];
   liveNow: LiveStreamSummary[];
   pastLive: LiveStreamSummary[];
+  investigations: import("@/lib/investigations").InvestigationSummary[];
 };
 
-export type ReporterProfileTab = "reporting" | "live" | "places" | "footage";
+export type ReporterProfileTab = "reporting" | "investigations" | "live" | "places" | "footage";
 
 export function countLabel(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -27,6 +28,7 @@ export function assembleReporterProfilePage(
   extras?: Partial<Pick<ReporterStats, "followerCount" | "supportCount" | "correctionCount" | "completedLicensingCount">> & {
     liveNow?: LiveStreamSummary[];
     pastLive?: LiveStreamSummary[];
+    investigations?: import("@/lib/investigations").InvestigationSummary[];
   },
 ): ReporterProfilePage {
   const latestReports = [...reports].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
@@ -43,6 +45,7 @@ export function assembleReporterProfilePage(
     placesCovered,
     liveNow,
     pastLive,
+    investigations: extras?.investigations ?? [],
   };
 }
 
@@ -60,7 +63,7 @@ export function compactReporterStatsLine(stats: ReporterStats, livestreamCount =
 
 export function parseReporterProfileTab(value: string | string[] | undefined): ReporterProfileTab {
   const tab = Array.isArray(value) ? value[0] : value;
-  if (tab === "live" || tab === "places" || tab === "footage" || tab === "reporting") {
+  if (tab === "live" || tab === "places" || tab === "footage" || tab === "reporting" || tab === "investigations") {
     return tab;
   }
   return "reporting";

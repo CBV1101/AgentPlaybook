@@ -7,7 +7,8 @@ import {
   type CoverageOpportunity,
   type GlobeActivityMarker,
 } from "@/lib/coverage-opportunity";
-import { isActiveLiveStatus, liveHref } from "@/lib/live";
+import { isActiveLiveStatus, liveHref, reporterProfileHref } from "@/lib/live";
+import { haversineKm } from "@/lib/live-for-location";
 
 export async function getWantedPresentation(userId?: string | null) {
   const [requests, feed] = await Promise.all([listOpenCoverageWanted(userId), getHomeFeed()]);
@@ -109,19 +110,37 @@ function buildGlobeMarkers(input: {
   opportunities: CoverageOpportunity[];
 }): GlobeActivityMarker[] {
   const markers: GlobeActivityMarker[] = [];
-  for (const stream of input.liveStreams) {
-    if (!isActiveLiveStatus(stream.status) || stream.location.latitude == null || stream.location.longitude == null) {
+  const liveUsed = new Set<string>();
+  const liveStreams = input.liveStreams.filter(
+    (stream) => isActiveLiveStatus(stream.status) && stream.location.latitude != null && stream.location.longitude != null,
+  );
+  for (const stream of liveStreams) {
+    if (liveUsed.has(stream.id)) {
       continue;
     }
+    const cluster = liveStreams.filter((candidate) => {
+      if (liveUsed.has(candidate.id)) {
+        return false;
+      }
+      return (
+        haversineKm(
+          { latitude: stream.location.latitude as number, longitude: stream.location.longitude as number },
+          { latitude: candidate.location.latitude as number, longitude: candidate.location.longitude as number },
+        ) <= 1.5
+      );
+    });
+    for (const member of cluster) {
+      liveUsed.add(member.id);
+    }
     markers.push({
-      id: `live:${stream.id}`,
+      id: `live-place:${stream.location.city}|${stream.location.country}|${stream.id}`,
       kind: "live",
-      latitude: stream.location.latitude,
-      longitude: stream.location.longitude,
+      latitude: stream.location.latitude as number,
+      longitude: stream.location.longitude as number,
       city: stream.location.city,
       country: stream.location.country,
       title: stream.title,
-      href: liveHref(stream.id),
+      href: reporterProfileHref(stream.reporterUsername) ?? liveHref(stream.id),
       subtitle: "LIVE",
       reporterName: stream.reporterName,
     });

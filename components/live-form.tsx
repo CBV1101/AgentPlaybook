@@ -8,6 +8,8 @@ import { Field, TextInput } from "@/components/ui/field";
 import { ErrorState, Notice } from "@/components/ui/page";
 import { createLiveStream } from "@/lib/live-actions";
 import { LIVE_STREAM_PUBLISHING_RULES } from "@/lib/moderation";
+import { InvestigationSelectField } from "@/components/investigation-select-field";
+import type { ReporterInvestigationOption } from "@/lib/investigations";
 import type { GeocodeSuggestion } from "@/lib/location";
 
 const errorCopy: Record<string, string> = {
@@ -23,6 +25,7 @@ type LiveFormProps = {
   requestId?: string | null;
   requestTitle?: string | null;
   error?: string;
+  investigations?: ReporterInvestigationOption[];
 };
 
 export function LiveForm({
@@ -32,6 +35,7 @@ export function LiveForm({
   requestId,
   requestTitle,
   error,
+  investigations = [],
 }: LiveFormProps) {
   const [pickedLocation, setPickedLocation] = useState<GeocodeSuggestion | null>(null);
 
@@ -73,6 +77,7 @@ export function LiveForm({
       )}
 
       <EventAssociationField locationId={locationId} location={pickedLocation} defaultEventId={eventId} />
+      <InvestigationSelectField investigations={investigations} />
 
       <div className="fh-alert bg-warn-soft text-ink">
         <p className="font-medium">Live reporting rules</p>

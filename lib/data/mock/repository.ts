@@ -7,6 +7,7 @@ import {
   mockLiveLocationIds,
   applyLiveTermination,
 } from "@/lib/data/mock/live-repository";
+import { mockListPublicInvestigationsForReporter, mockLookupInvestigationForReport } from "@/lib/data/mock/investigation-repository";
 import { getMockUser } from "@/lib/data/mock/session";
 import {
   applyReporterAvatarFile,
@@ -34,7 +35,8 @@ import {
   type GeographySearchHit,
 } from "@/lib/data/geography";
 import { findGeoFollowLocation, geoFollowInsertFields, geoFollowSlugBase } from "@/lib/data/geo-follow";
-import { assembleFollowingFeed, type FollowingFeedItem, type GeoFollowTarget } from "@/lib/follows";
+import { type GeoFollowTarget } from "@/lib/follows";
+import { assembleYourWorldFeed, type YourWorldItem } from "@/lib/your-world";
 import {
   isLicensingInquiryStatus,
   normalizeInquiryStatus,
@@ -584,14 +586,14 @@ export async function mockGetProfilePage(username: string) {
   if (!profile) {
     return null;
   }
-  return buildMockReporterPage(database, profile);
+  return await buildMockReporterPage(database, profile);
 }
 
 export async function mockGetProfileByUserId(userId: string) {
   return readMockDatabase().profiles.find((item) => item.id === userId) ?? null;
 }
 
-function buildMockReporterPage(
+async function buildMockReporterPage(
   database: ReturnType<typeof readMockDatabase>,
   profile: NonNullable<ReturnType<typeof readMockDatabase>["profiles"][number]>,
 ) {
@@ -613,6 +615,7 @@ function buildMockReporterPage(
   ).length;
 
   const streams = mockListPublicLiveStreams({ reporterId: profile.id });
+  const investigations = await mockListPublicInvestigationsForReporter(profile.id);
   return assembleReporterProfilePage(profile, reports, locationsById, {
     followerCount,
     supportCount,
@@ -620,6 +623,7 @@ function buildMockReporterPage(
     completedLicensingCount,
     liveNow: streams.filter((item) => item.status === "live"),
     pastLive: streams.filter((item) => item.status === "ended"),
+    investigations,
   });
 }
 
@@ -950,50 +954,80 @@ export async function mockUnfollowLocation(userId: string, target: GeoFollowTarg
   });
 }
 
-export async function mockGetFollowingFeed(userId: string): Promise<FollowingFeedItem[]> {
-  const database = readMockDatabase();
-  const followedReporterIds = new Set(
-    database.profile_follows.filter((item) => item.follower_id === userId).map((item) => item.following_id),
+export async function mockIsFollowingInvestigation(userId: string, investigationId: string) {
+  return (readMockDatabase().investigation_follows ?? []).some(
+    (item) => item.user_id === userId && item.investigation_id === investigationId,
   );
-  const followedLocations = database.location_follows
-    .filter((item) => item.user_id === userId)
-    .flatMap((item) => {
-      const location = database.locations.find((row) => row.id === item.location_id);
-      return location ? [toLocationSummary(location)] : [];
-    });
+}
 
-  const reports = database.reports.filter(isPublicReport).flatMap((item) => {
+export async function mockFollowInvestigation(userId: string, investigationId: string) {
+  const database = readMockDatabase();
+  const investigation = (database.investigations ?? []).find((item) => item.id === investigationId);
+  if (!investigation) {
+    throw new Error("That investigation was not found.");
+  }
+  if ((database.investigation_follows ?? []).some((item) => item.user_id === userId && item.investigation_id === investigationId)) {
+    return;
+  }
+  updateMockDatabase((current) => {
+    current.investigation_follows ??= [];
+    current.investigation_follows.push({
+      id: randomUUID(),
+      user_id: userId,
+      investigation_id: investigationId,
+      created_at: new Date().toISOString(),
+    });
+  });
+}
+
+export async function mockUnfollowInvestigation(userId: string, investigationId: string) {
+  updateMockDatabase((current) => {
+    current.investigation_follows = (current.investigation_follows ?? []).filter(
+      (item) => !(item.user_id === userId && item.investigation_id === investigationId),
+    );
+  });
+}
+
+export async function mockGetFollowingFeed(
+  userId: string,
+  before?: string | null,
+  excludeReportIds?: Iterable<string>,
+): Promise<{ items: YourWorldItem[]; hasMore: boolean }> {
+  const database = readMockDatabase();
+  const graph = await mockGetFollowGraph(userId);
+
+  const rows = database.reports.filter(isPublicReport).flatMap((item) => {
     const joined = joinReport(database, item.id);
     if (!joined?.locations) {
       return [];
     }
+    const lookup = mockLookupInvestigationForReport(item.id);
+    const invRow = (database.investigation_items ?? []).find((row) => row.report_id === item.id);
     return [
       {
         report: toReport(joined),
         createdBy: item.created_by,
         location: toLocationSummary(joined.locations),
+        investigation:
+          lookup && invRow
+            ? {
+                investigationId: invRow.investigation_id,
+                title: lookup.title,
+                href: lookup.href,
+                position: lookup.position,
+              }
+            : null,
       },
     ];
   });
 
-  const requests = database.coverage_requests.filter(isVisible).flatMap((item) => {
-    const joined = joinRequest(database, item.id);
-    if (!joined?.locations) {
-      return [];
-    }
-    return [
-      {
-        request: toCoverageRequest(joined, userId),
-        location: toLocationSummary(joined.locations),
-      },
-    ];
-  });
-
-  return assembleFollowingFeed({
-    followedReporterIds,
-    followedLocations,
-    reports,
-    requests,
+  return assembleYourWorldFeed({
+    followedReporterIds: new Set(graph.reporterIds),
+    followedLocations: graph.locations,
+    followedInvestigationIds: new Set(graph.investigationIds),
+    rows,
+    before,
+    excludeReportIds: excludeReportIds ? new Set(excludeReportIds) : undefined,
   });
 }
 
@@ -1008,7 +1042,19 @@ export async function mockGetFollowGraph(userId: string) {
       const location = database.locations.find((row) => row.id === item.location_id);
       return location ? [toLocationSummary(location)] : [];
     });
-  return { reporterIds, locations };
+  const investigationIds = (database.investigation_follows ?? [])
+    .filter((item) => item.user_id === userId)
+    .map((item) => item.investigation_id);
+  const investigationItems = (database.investigation_items ?? []).filter((item) =>
+    investigationIds.includes(item.investigation_id),
+  );
+  return {
+    reporterIds,
+    locations,
+    investigationIds,
+    investigationLiveStreamIds: investigationItems.flatMap((item) => (item.live_stream_id ? [item.live_stream_id] : [])),
+    investigationReportIds: investigationItems.flatMap((item) => (item.report_id ? [item.report_id] : [])),
+  };
 }
 
 export async function mockSupportReport(reportId: string, userId: string) {

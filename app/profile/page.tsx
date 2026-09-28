@@ -105,6 +105,9 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
               Email: <span className="font-medium">{user.email}</span>
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
+              <Link href="/profile/investigations" className={buttonClass("secondary")}>
+                Investigations
+              </Link>
               <Link href="/notifications" className={buttonClass("secondary")}>
                 Notifications
               </Link>

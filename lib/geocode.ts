@@ -1,4 +1,4 @@
-import type { GeocodeSuggestion } from "@/lib/location";
+import type { BoundingBox, GeoScope, GeocodeSuggestion } from "@/lib/location";
 import { slugify } from "@/lib/location";
 
 type NominatimAddress = {
@@ -24,6 +24,10 @@ type NominatimResult = {
   lon: string;
   name?: string;
   display_name: string;
+  addresstype?: string;
+  type?: string;
+  class?: string;
+  boundingbox?: [string, string, string, string];
   address?: NominatimAddress;
 };
 
@@ -70,12 +74,54 @@ export async function searchPlaces(query: string): Promise<GeocodeSuggestion[]> 
   });
 }
 
+function parseBoundingBox(result: NominatimResult): BoundingBox | null {
+  const box = result.boundingbox;
+  if (!box || box.length < 4) {
+    return null;
+  }
+  const south = Number(box[0]);
+  const north = Number(box[1]);
+  const west = Number(box[2]);
+  const east = Number(box[3]);
+  if (![south, north, west, east].every(Number.isFinite)) {
+    return null;
+  }
+  return { south, north, west, east };
+}
+
+function inferGeoScope(result: NominatimResult, namedPlace: string | null, adminCity: string | undefined): GeoScope {
+  const type = (result.addresstype || result.type || "").toLowerCase();
+  if (type === "country") {
+    return "country";
+  }
+  if (type === "state" || type === "state_district" || type === "region") {
+    return "region";
+  }
+  if (
+    type === "suburb" ||
+    type === "neighbourhood" ||
+    type === "neighborhood" ||
+    type === "quarter" ||
+    type === "city_district" ||
+    type === "borough" ||
+    type === "peak" ||
+    type === "attraction" ||
+    type === "building"
+  ) {
+    return "place";
+  }
+  if (namedPlace && adminCity && !isSamePlace(namedPlace, adminCity)) {
+    return "place";
+  }
+  return "city";
+}
+
 function toSuggestion(result: NominatimResult): GeocodeSuggestion | null {
   const latitude = Number(result.lat);
   const longitude = Number(result.lon);
   const address = result.address ?? {};
   const country = address.country?.trim();
-  const city =
+  const adminCity =
     address.city?.trim() ||
     address.town?.trim() ||
     address.village?.trim() ||
@@ -84,7 +130,7 @@ function toSuggestion(result: NominatimResult): GeocodeSuggestion | null {
     address.county?.trim() ||
     address.state?.trim();
 
-  if (!country || !city || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+  if (!country || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     return null;
   }
 
@@ -99,7 +145,35 @@ function toSuggestion(result: NominatimResult): GeocodeSuggestion | null {
     address.neighbourhood?.trim() ||
     null;
 
-  const place = namedPlace && !isSamePlace(namedPlace, city) ? namedPlace : namedPlace || null;
+  const scope = inferGeoScope(result, namedPlace, adminCity);
+  const boundingBox = parseBoundingBox(result);
+
+  if (scope === "country") {
+    return {
+      country: country.slice(0, 80),
+      city: "",
+      place: null,
+      latitude,
+      longitude,
+      label: country,
+      scope,
+      boundingBox,
+    };
+  }
+
+  const city =
+    scope === "place" && namedPlace
+      ? namedPlace
+      : scope === "region"
+        ? address.state?.trim() || adminCity
+        : adminCity;
+
+  if (!city) {
+    return null;
+  }
+
+  const place =
+    namedPlace && !isSamePlace(namedPlace, city) ? namedPlace : namedPlace && isSamePlace(namedPlace, city) ? null : namedPlace;
 
   return {
     country: country.slice(0, 80),
@@ -108,6 +182,8 @@ function toSuggestion(result: NominatimResult): GeocodeSuggestion | null {
     latitude,
     longitude,
     label: [place, city, country].filter(Boolean).join(", "),
+    scope,
+    boundingBox,
   };
 }
 

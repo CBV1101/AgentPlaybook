@@ -4,19 +4,22 @@ import { HomeHero } from "@/components/home-hero";
 import { HomePhilosophy } from "@/components/home-philosophy";
 import { HowFirsthandWorks } from "@/components/how-firsthand-works";
 import { LiveNowSection } from "@/components/live-now-section";
+import { OngoingInvestigationsSection } from "@/components/ongoing-investigations";
 import { ReportCard } from "@/components/report-card";
 import { WorldActivitySection } from "@/components/world-activity-section";
 import { EmptyState, Page } from "@/components/ui/page";
 import { getCurrentUser } from "@/lib/auth";
 import { applyHomepageShowcase } from "@/lib/homepage-showcase";
+import { applyPublishedInvestigationsShowcase } from "@/lib/investigation-showcase";
 import { rankLiveNow } from "@/lib/live-rank";
-import { getBrowseOverview, getHomeFeed } from "@/lib/queries";
+import { getBrowseOverview, getHomeFeed, listPublishedInvestigations } from "@/lib/queries";
 
 export default async function Home() {
-  const [feed, overview, user] = await Promise.all([
+  const [feed, overview, user, publishedInvestigations] = await Promise.all([
     getHomeFeed(),
     getBrowseOverview(),
     getCurrentUser(),
+    listPublishedInvestigations(),
   ]);
   const signedIn = Boolean(user);
   const presentation = applyHomepageShowcase({
@@ -29,6 +32,7 @@ export default async function Home() {
   });
   const rankedLive = rankLiveNow(presentation.liveStreams, presentation.requests, presentation.events);
   const cities = presentation.cities.slice(0, 10);
+  const investigations = applyPublishedInvestigationsShowcase(publishedInvestigations);
 
   return (
     <Page width="home">
@@ -37,8 +41,9 @@ export default async function Home() {
           Development showcase — visual fallback only. Not stored in Supabase and never shown in production.
         </p>
       ) : null}
-      <HomeHero signedIn={signedIn} />
+      <HomeHero signedIn={signedIn} liveStreams={presentation.liveStreams} reports={presentation.reports} />
       <LiveNowSection ranked={rankedLive} signedIn={signedIn} />
+      <OngoingInvestigationsSection investigations={investigations.investigations} />
       <HowFirsthandWorks signedIn={signedIn} />
       <CoverageWantedSection requests={presentation.requests} signedIn={signedIn} />
       <WorldActivitySection cities={cities} places={presentation.places} />

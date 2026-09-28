@@ -155,7 +155,7 @@ export async function createReportDraft(formData: FormData) {
   }
 }
 
-export async function publishReport(reportId: string) {
+export async function publishReport(reportId: string, investigationId?: string | null) {
   const user = await getCurrentUser();
   if (!user) {
     redirect(loginPath("/reports/new"));
@@ -168,7 +168,7 @@ export async function publishReport(reportId: string) {
     return { ok: false as const, error: "That report was not found." };
   }
   try {
-    await publishReportRecord(user.id, reportId);
+    await publishReportRecord(user.id, reportId, investigationId || null);
     return { ok: true as const, reportId };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not publish the report.";

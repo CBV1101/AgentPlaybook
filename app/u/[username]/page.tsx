@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { InvestigationCard } from "@/components/investigation-card";
+import { CompactRecentReportCard } from "@/components/compact-live-stream-card";
 import { DiscoveryMap } from "@/components/discovery-map";
 import { FollowButton } from "@/components/follow-button";
 import { FootageRow } from "@/components/footage-row";
@@ -13,6 +15,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { isFollowingReporter } from "@/lib/data";
 import type { DiscoveryPlace } from "@/lib/data/discovery";
 import { parseReporterProfileTab, type ReporterProfileTab } from "@/lib/data/reporter";
+import { applyHomepageLiveReporterShowcase } from "@/lib/homepage-showcase";
+import { applyShowcaseReporterProfile } from "@/lib/investigation-showcase";
 import { cityHref, countryHref } from "@/lib/geo";
 import { liveHref } from "@/lib/live";
 import { reporterTopicLabels } from "@/lib/profile";
@@ -26,7 +30,11 @@ type PublicProfilePageProps = {
 export default async function PublicProfilePage({ params, searchParams }: PublicProfilePageProps) {
   const { username } = await params;
   const query = await searchParams;
-  const page = await getProfilePage(username);
+  const loaded = await getProfilePage(username);
+  const page = applyHomepageLiveReporterShowcase(
+    username,
+    applyShowcaseReporterProfile(username, loaded),
+  );
 
   if (!page) {
     notFound();
@@ -45,8 +53,14 @@ export default async function PublicProfilePage({ params, searchParams }: Public
   const showLive = page.liveNow.length > 0 || page.pastLive.length > 0 || recordedReports.length > 0;
   const showPlaces = page.placesCovered.length > 0;
   const showFootage = page.licensingReports.length > 0;
+  const showInvestigations = page.investigations.length > 0;
 
   let tab = parseReporterProfileTab(query.tab);
+  if (!query.tab && page.liveNow.length > 0) {
+    tab = "live";
+  } else if (!query.tab && showInvestigations) {
+    tab = "investigations";
+  }
   if (tab === "live" && !showLive) {
     tab = "reporting";
   }
@@ -54,6 +68,9 @@ export default async function PublicProfilePage({ params, searchParams }: Public
     tab = "reporting";
   }
   if (tab === "footage" && !showFootage) {
+    tab = "reporting";
+  }
+  if (tab === "investigations" && !showInvestigations) {
     tab = "reporting";
   }
 
@@ -89,9 +106,14 @@ export default async function PublicProfilePage({ params, searchParams }: Public
             </div>
             <div className="flex shrink-0 items-center gap-3">
               {isOwner ? (
-                <Link href="/profile" className="fh-meta underline">
-                  Edit profile
-                </Link>
+                <>
+                  <Link href="/profile/investigations" className="fh-meta underline">
+                    Investigations
+                  </Link>
+                  <Link href="/profile" className="fh-meta underline">
+                    Edit profile
+                  </Link>
+                </>
               ) : (
                 <FollowButton
                   kind="reporter"
@@ -154,8 +176,13 @@ export default async function PublicProfilePage({ params, searchParams }: Public
       </header>
 
       <Tabs className="mt-8">
+        {showInvestigations ? (
+          <TabLink href={profileTabHref(page.profile.username, "investigations", sortOldest)} active={tab === "investigations"}>
+            Investigations
+          </TabLink>
+        ) : null}
         <TabLink href={profileTabHref(page.profile.username, "reporting", sortOldest)} active={tab === "reporting"}>
-          Reporting
+          Reports
         </TabLink>
         {showLive ? (
           <TabLink href={profileTabHref(page.profile.username, "live", sortOldest)} active={tab === "live"}>
@@ -173,6 +200,16 @@ export default async function PublicProfilePage({ params, searchParams }: Public
           </TabLink>
         ) : null}
       </Tabs>
+
+      {tab === "investigations" && showInvestigations ? (
+        <section className="mt-6">
+          <div className="fh-grid">
+            {page.investigations.map((item) => (
+              <InvestigationCard key={item.id} investigation={item} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {tab === "reporting" ? (
         <section className="mt-6">
@@ -195,9 +232,9 @@ export default async function PublicProfilePage({ params, searchParams }: Public
                   Oldest
                 </Link>
               </p>
-              <div className="fh-grid">
+              <div className="fh-live-grid mt-4">
                 {reports.map((report) => (
-                  <ReportCard key={report.id} report={report} />
+                  <CompactRecentReportCard key={report.id} report={report} />
                 ))}
               </div>
             </>
@@ -287,8 +324,12 @@ export default async function PublicProfilePage({ params, searchParams }: Public
 
 function profileTabHref(username: string, tab: ReporterProfileTab, oldest: boolean) {
   const params = new URLSearchParams();
-  if (tab !== "reporting") {
+  if (tab !== "investigations" && tab !== "reporting") {
     params.set("tab", tab);
+  } else if (tab === "reporting") {
+    params.set("tab", "reporting");
+  } else if (tab === "investigations") {
+    params.set("tab", "investigations");
   }
   if (oldest) {
     params.set("sort", "oldest");

@@ -1,7 +1,7 @@
 import { ReportForm } from "@/components/report-form";
 import { Page } from "@/components/ui/page";
 import { requireCompleteReporterProfile } from "@/lib/require-profile";
-import { getRequestComposeContext } from "@/lib/queries";
+import { getRequestComposeContext, listInvestigationOptions } from "@/lib/queries";
 import { notFound } from "next/navigation";
 
 type NewReportPageProps = {
@@ -11,7 +11,8 @@ type NewReportPageProps = {
 export default async function NewReportPage({ searchParams }: NewReportPageProps) {
   const { requestId, error } = await searchParams;
   const nextPath = requestId ? `/reports/new?requestId=${requestId}` : "/reports/new";
-  await requireCompleteReporterProfile(nextPath);
+  const { profile } = await requireCompleteReporterProfile(nextPath);
+  const investigations = await listInvestigationOptions(profile.id);
 
   let requestTitle: string | undefined;
   let locationId = "";
@@ -50,6 +51,7 @@ export default async function NewReportPage({ searchParams }: NewReportPageProps
           locationLabel={locationLabel || undefined}
           eventId={eventId}
           error={error}
+          investigations={investigations}
         />
       </div>
     </Page>

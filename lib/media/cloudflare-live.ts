@@ -89,6 +89,37 @@ export async function createCloudflareLiveInput(input: {
   };
 }
 
+export async function getCloudflareLiveViewerCount(uid: string): Promise<number | null> {
+  const response = await streamFetch(`/stream/live_inputs/${uid}`);
+  const payload = (await response.json()) as {
+    success?: boolean;
+    result?: Record<string, unknown>;
+  };
+  if (!response.ok || !payload.success || !payload.result) {
+    return null;
+  }
+  const result = payload.result;
+  const status = result.status;
+  const nested =
+    status && typeof status === "object" && !Array.isArray(status)
+      ? (status as Record<string, unknown>)
+      : null;
+  const candidates = [
+    result.currentViewers,
+    result.current_viewers,
+    result.viewers,
+    nested?.currentViewers,
+    nested?.current_viewers,
+  ];
+  for (const value of candidates) {
+    const count = Number(value);
+    if (Number.isFinite(count) && count >= 0) {
+      return Math.round(count);
+    }
+  }
+  return null;
+}
+
 export async function getCloudflareLiveInput(uid: string) {
   const response = await streamFetch(`/stream/live_inputs/${uid}`);
   const payload = (await response.json()) as CloudflareLiveResult;

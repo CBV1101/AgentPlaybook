@@ -23,6 +23,7 @@ export type LiveStreamSummary = {
   thumbnailUrl: string | null;
   sensitiveContent: boolean;
   recordingAssetId: string | null;
+  viewerCount: number | null;
 };
 
 export const LIVE_HEARTBEAT_STALE_MS = 75_000;
@@ -32,6 +33,17 @@ export const MOCK_LIVE_SAMPLE_VIDEO =
 
 export function liveHref(id: string) {
   return `/live/${id}`;
+}
+
+export function reporterProfileHref(username?: string | null) {
+  const value = username?.trim();
+  if (!value) {
+    if (process.env.NODE_ENV === "development") {
+      console.warn("[firsthand] Public stream is missing a reporter username; not linking to a reporter profile.");
+    }
+    return null;
+  }
+  return `/u/${value}`;
 }
 
 export function liveBroadcastHref(id: string) {

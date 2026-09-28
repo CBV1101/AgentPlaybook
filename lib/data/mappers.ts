@@ -32,6 +32,8 @@ export type ReportJoinRow = {
   location_id: string;
   licensing_status?: "view_only" | "licensing_available";
   event_id?: string | null;
+  removed_at?: string | null;
+  publish_status?: string | null;
   locations: LocationRow | LocationRow[] | null;
   profiles:
     | (Pick<Profile, "display_name" | "username"> & Partial<Pick<Profile, "avatar_url">>)
@@ -48,7 +50,7 @@ export type ReportJoinRow = {
 };
 
 export const REPORT_FEED_SELECT =
-  "id, title, description, uploaded_at, captured_at, request_id, location_id, licensing_status, locations(*), profiles(display_name, username, avatar_url), report_media(media_type, media_url, thumbnail_url, original_filename), coverage_requests(title, request_interests(id))";
+  "id, title, description, uploaded_at, captured_at, request_id, location_id, licensing_status, removed_at, publish_status, locations(*), profiles(display_name, username, avatar_url), report_media(media_type, media_url, thumbnail_url, original_filename), coverage_requests(title, request_interests(id))";
 
 export function one<T>(value: T | T[] | null | undefined): T | null {
   if (!value) {
@@ -134,6 +136,7 @@ export function toReport(row: ReportJoinRow): FirsthandReport {
     thumbnailUrl: media.find((item) => item.thumbnail_url || item.media_type === "photo")?.thumbnail_url
       || media.find((item) => item.media_type === "photo")?.media_url
       || null,
+    mediaUrl: media.find((item) => item.media_type === "video" && item.media_url)?.media_url ?? null,
   };
 }
 

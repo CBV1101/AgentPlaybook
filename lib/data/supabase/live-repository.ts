@@ -10,6 +10,7 @@ import {
   createCloudflareLiveInput,
   disableCloudflareLiveInput,
   getCloudflareLiveInput,
+  getCloudflareLiveViewerCount,
   isCloudflareLiveConfigured,
   listCloudflareLiveRecordings,
 } from "@/lib/media/cloudflare-live";
@@ -92,6 +93,46 @@ async function hydrateLiveRows(
   });
 }
 
+const VIEWER_COUNT_TTL_MS = 45_000;
+
+async function refreshLiveViewerCounts(rows: LiveStreamRecord[], summaries: LiveStreamSummary[]) {
+  if (!isCloudflareLiveConfigured()) {
+    return;
+  }
+  const supabase = await createClient();
+  const now = Date.now();
+  const live = rows.filter(
+    (row) =>
+      row.status === "live" &&
+      row.cloudflare_live_input_id &&
+      !row.cloudflare_live_input_id.startsWith("local-"),
+  );
+  const stale = live
+    .filter((row) => {
+      const checked = row.viewer_count_checked_at ? new Date(row.viewer_count_checked_at).getTime() : 0;
+      return now - checked > VIEWER_COUNT_TTL_MS;
+    })
+    .slice(0, 8);
+  await Promise.all(
+    stale.map(async (row) => {
+      try {
+        const count = await getCloudflareLiveViewerCount(row.cloudflare_live_input_id!);
+        const checkedAt = new Date().toISOString();
+        await supabase
+          .from("live_streams")
+          .update({ viewer_count: count, viewer_count_checked_at: checkedAt })
+          .eq("id", row.id);
+        const summary = summaries.find((item) => item.id === row.id);
+        if (summary) {
+          summary.viewerCount = count;
+        }
+      } catch {
+        // Leave viewerCount unknown rather than inventing a number.
+      }
+    }),
+  );
+}
+
 export async function supabaseListPublicLiveStreams(filter?: {
   locationIds?: string[];
   eventId?: string;
@@ -122,6 +163,7 @@ export async function supabaseListPublicLiveStreams(filter?: {
   const { data } = await query.order("started_at", { ascending: false });
   const rows = (data ?? []) as LiveStreamRecord[];
   const summaries = await hydrateLiveRows(rows);
+  await refreshLiveViewerCounts(rows, summaries);
   return summaries.sort((a, b) => {
     if (a.status === "live" && b.status !== "live") {
       return -1;

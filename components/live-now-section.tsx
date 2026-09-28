@@ -12,7 +12,7 @@ export function LiveNowSection({
   signedIn: boolean;
 }) {
   return (
-    <section className="mt-10">
+    <section className="fh-live-section mt-10" data-home-live="grid">
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="fh-kicker text-live">Live now</p>
@@ -27,9 +27,7 @@ export function LiveNowSection({
         ) : null}
       </div>
       {ranked[0] ? (
-        <div className="mt-6">
-          <LiveStreamGrid streams={ranked} showMore={false} />
-        </div>
+        <LiveStreamGrid streams={ranked} showMore={false} />
       ) : (
         <EmptyState title="No one is broadcasting a live firsthand report at this moment.">
           <p className="mt-2">

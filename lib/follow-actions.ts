@@ -7,8 +7,10 @@ import { getCurrentUser } from "@/lib/auth";
 import {
   followLocation as followLocationRecord,
   followReporter as followReporterRecord,
+  followInvestigation as followInvestigationRecord,
   unfollowLocation as unfollowLocationRecord,
   unfollowReporter as unfollowReporterRecord,
+  unfollowInvestigation as unfollowInvestigationRecord,
 } from "@/lib/data";
 import type { GeoFollowKind, GeoFollowTarget } from "@/lib/follows";
 import { parseCoordinate } from "@/lib/location";
@@ -102,6 +104,52 @@ export async function unfollowReporter(formData: FormData) {
       throw error;
     }
     const message = error instanceof Error ? error.message : "Could not unfollow this reporter.";
+    redirect(withError(next, message));
+  }
+  redirect(next);
+}
+
+export async function followInvestigation(formData: FormData) {
+  const next = nextFromForm(formData);
+  const investigationId = formString(formData, "investigation_id");
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect(loginPath(next));
+  }
+  if (!investigationId) {
+    redirect(withError(next, "investigation"));
+  }
+  try {
+    await followInvestigationRecord(user.id, investigationId);
+    revalidateFollows(next);
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : "Could not follow this investigation.";
+    redirect(withError(next, message));
+  }
+  redirect(next);
+}
+
+export async function unfollowInvestigation(formData: FormData) {
+  const next = nextFromForm(formData);
+  const investigationId = formString(formData, "investigation_id");
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect(loginPath(next));
+  }
+  if (!investigationId) {
+    redirect(withError(next, "investigation"));
+  }
+  try {
+    await unfollowInvestigationRecord(user.id, investigationId);
+    revalidateFollows(next);
+  } catch (error) {
+    if (isRedirectError(error)) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : "Could not unfollow this investigation.";
     redirect(withError(next, message));
   }
   redirect(next);

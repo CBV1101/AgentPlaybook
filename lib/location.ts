@@ -1,3 +1,12 @@
+export type GeoScope = "country" | "region" | "city" | "place";
+
+export type BoundingBox = {
+  south: number;
+  north: number;
+  west: number;
+  east: number;
+};
+
 export type StructuredLocation = {
   country: string;
   city: string;
@@ -8,6 +17,8 @@ export type StructuredLocation = {
 
 export type GeocodeSuggestion = StructuredLocation & {
   label: string;
+  scope?: GeoScope;
+  boundingBox?: BoundingBox | null;
 };
 
 export function slugify(value: string) {

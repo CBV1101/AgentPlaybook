@@ -69,6 +69,10 @@ export async function createLiveStream(formData: FormData) {
       locationId,
       eventId,
       requestId,
+      investigationId: (() => {
+        const value = formString(formData, "investigation_id");
+        return value && value !== "__create__" ? value : null;
+      })(),
     });
     redirect(`/live/${created.id}/broadcast`);
   } catch (error) {

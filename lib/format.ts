@@ -62,6 +62,19 @@ export function formatDuration(startedAt: string, endedAt: string) {
   return `${hours}h ${rest}m`;
 }
 
+export function formatWatchingCount(count: number) {
+  if (!Number.isFinite(count) || count < 0) {
+    return null;
+  }
+  const whole = Math.round(count);
+  if (whole < 1000) {
+    return `${whole} watching`;
+  }
+  const thousands = whole / 1000;
+  const compact = thousands >= 10 ? Math.round(thousands).toString() : thousands.toFixed(1).replace(/\.0$/, "");
+  return `${compact}K watching`;
+}
+
 function relativeCount(count: number, unit: string, future: boolean) {
   const label = `${count} ${count === 1 ? unit : `${unit}s`}`;
   return future ? `in ${label}` : `${label} ago`;

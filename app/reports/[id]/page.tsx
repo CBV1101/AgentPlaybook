@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { FollowButton } from "@/components/follow-button";
 import { GeographyBreadcrumbs } from "@/components/geography-breadcrumbs";
 import { LicensingInquiryForm } from "@/components/licensing-inquiry-form";
@@ -27,6 +27,13 @@ type ReportPageProps = {
 
 export default async function ReportPage({ params, searchParams }: ReportPageProps) {
   const { id } = await params;
+  if (process.env.NODE_ENV === "development" && id.startsWith("dev-showcase-")) {
+    const { getHomepageShowcaseContent } = await import("@/lib/homepage-showcase");
+    const report = getHomepageShowcaseContent().reports.find((item) => item.id === id);
+    if (report?.reporterUsername) {
+      redirect(`/u/${report.reporterUsername}`);
+    }
+  }
   const { notice, error } = await searchParams;
   const user = await getCurrentUser();
   const [page, isAdmin] = await Promise.all([getReportPage(id, user?.id), currentUserIsAdmin()]);

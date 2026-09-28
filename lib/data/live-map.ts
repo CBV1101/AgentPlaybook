@@ -68,5 +68,6 @@ export function toLiveStreamSummary(input: {
     thumbnailUrl: input.thumbnailUrl ?? null,
     sensitiveContent: sensitive,
     recordingAssetId: input.includeModerationPlayback ? recordingId : null,
+    viewerCount: row.viewer_count ?? null,
   };
 }

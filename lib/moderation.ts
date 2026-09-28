@@ -27,7 +27,7 @@ export const MODERATION_STATUSES = ["open", "reviewed", "dismissed", "removed"] 
 
 export type ModerationReason = (typeof MODERATION_REASONS)[number]["id"];
 export type ModerationStatus = (typeof MODERATION_STATUSES)[number];
-export type ModerationContentType = "firsthand_report" | "coverage_request" | "live_stream";
+export type ModerationContentType = "firsthand_report" | "coverage_request" | "live_stream" | "investigation";
 
 export function moderationReasonLabel(reason: string) {
   return MODERATION_REASONS.find((item) => item.id === reason)?.label ?? reason;

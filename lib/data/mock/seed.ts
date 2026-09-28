@@ -9,10 +9,13 @@ import { uploadProvenanceFields } from "@/lib/media/provenance";
 import type {
   CoverageRequestRecord,
   EventRecord,
+  InvestigationItemRecord,
+  InvestigationRecord,
   LicensingTransaction,
   LiveStreamRecord,
   Location,
   LocationFollow,
+  InvestigationFollow,
   NotificationPreferenceRow,
   NotificationRecordRow,
   Profile,
@@ -25,7 +28,7 @@ import type {
   ModerationReportRecord,
 } from "@/lib/database.types";
 
-export const MOCK_SCHEMA_VERSION = 20;
+export const MOCK_SCHEMA_VERSION = 22;
 export const DEMO_EMAIL = "jordan@firsthand.local";
 export const DEMO_PASSWORD = "firsthand";
 
@@ -74,11 +77,14 @@ export type MockDatabase = {
   report_media: ReportMedia[];
   profile_follows: ProfileFollow[];
   location_follows: LocationFollow[];
+  investigation_follows: InvestigationFollow[];
   report_supports: ReportSupport[];
   report_corrections: ReportCorrection[];
   licensing_transactions: LicensingTransaction[];
   moderation_reports: ModerationReportRecord[];
   live_streams: LiveStreamRecord[];
+  investigations: InvestigationRecord[];
+  investigation_items: InvestigationItemRecord[];
   notifications: NotificationRecordRow[];
   notification_preferences: NotificationPreferenceRow[];
 };
@@ -411,6 +417,7 @@ export function createSeedDatabase(): MockDatabase {
       },
     ],
     location_follows: [],
+    investigation_follows: [],
     report_supports: [
       {
         id: ids.supportJordanPark,
@@ -449,6 +456,8 @@ export function createSeedDatabase(): MockDatabase {
     ],
     moderation_reports: [],
     live_streams: [],
+    investigations: [],
+    investigation_items: [],
     notifications: [],
     notification_preferences: [],
   } as unknown as MockDatabase;

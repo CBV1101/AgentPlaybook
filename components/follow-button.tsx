@@ -1,5 +1,5 @@
 import { buttonClass } from "@/components/ui/button";
-import { followLocation, followReporter, unfollowLocation, unfollowReporter } from "@/lib/follow-actions";
+import { followLocation, followReporter, followInvestigation, unfollowLocation, unfollowReporter, unfollowInvestigation } from "@/lib/follow-actions";
 import { loginPath } from "@/lib/paths";
 import type { GeoFollowKind } from "@/lib/follows";
 import Link from "next/link";
@@ -12,6 +12,7 @@ type FollowButtonProps = {
   followingLabel: string;
 } & (
   | { kind: "reporter"; reporterId: string }
+  | { kind: "investigation"; investigationId: string }
   | {
       kind: GeoFollowKind;
       country: string;
@@ -38,6 +39,16 @@ export function FollowButton(props: FollowButtonProps) {
     return (
       <form action={props.following ? unfollowReporter : followReporter}>
         <input type="hidden" name="reporter_id" value={props.reporterId} />
+        <input type="hidden" name="next" value={props.nextPath} />
+        <FollowSubmit following={props.following} followLabel={props.followLabel} followingLabel={props.followingLabel} />
+      </form>
+    );
+  }
+
+  if (props.kind === "investigation") {
+    return (
+      <form action={props.following ? unfollowInvestigation : followInvestigation}>
+        <input type="hidden" name="investigation_id" value={props.investigationId} />
         <input type="hidden" name="next" value={props.nextPath} />
         <FollowSubmit following={props.following} followLabel={props.followLabel} followingLabel={props.followingLabel} />
       </form>

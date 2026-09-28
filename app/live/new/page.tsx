@@ -1,7 +1,7 @@
 import { LiveForm } from "@/components/live-form";
 import { Page } from "@/components/ui/page";
 import { requireCompleteReporterProfile } from "@/lib/require-profile";
-import { getEventPage, getLocationById, getRequestComposeContext } from "@/lib/queries";
+import { getEventPage, getLocationById, getRequestComposeContext, listInvestigationOptions } from "@/lib/queries";
 import { notFound } from "next/navigation";
 
 type NewLivePageProps = {
@@ -26,6 +26,7 @@ export default async function NewLivePage({ searchParams }: NewLivePageProps) {
           : nextPath,
   );
   const canLive = profile.can_live_stream !== false;
+  const investigations = await listInvestigationOptions(profile.id);
 
   let requestTitle: string | undefined;
   let resolvedLocationId = locationId ?? "";
@@ -74,6 +75,7 @@ export default async function NewLivePage({ searchParams }: NewLivePageProps) {
             requestId={requestId}
             requestTitle={requestTitle}
             error={error}
+            investigations={investigations}
           />
         ) : (
           <p className="fh-body">

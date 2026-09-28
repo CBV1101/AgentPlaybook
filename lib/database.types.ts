@@ -395,6 +395,27 @@ export type Database = {
         };
         Relationships: [];
       };
+      investigation_follows: {
+        Row: {
+          id: string;
+          user_id: string;
+          investigation_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          investigation_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          investigation_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
       location_follows: {
         Row: {
           id: string;
@@ -544,6 +565,78 @@ export type Database = {
           },
         ];
       };
+      investigations: {
+        Row: {
+          id: string;
+          reporter_id: string;
+          title: string;
+          slug: string;
+          description: string | null;
+          cover_media_id: string | null;
+          location_id: string | null;
+          status: Database["public"]["Enums"]["investigation_status"];
+          created_at: string;
+          updated_at: string;
+          published_at: string | null;
+          removed_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          reporter_id: string;
+          title: string;
+          slug: string;
+          description?: string | null;
+          cover_media_id?: string | null;
+          location_id?: string | null;
+          status?: Database["public"]["Enums"]["investigation_status"];
+          created_at?: string;
+          updated_at?: string;
+          published_at?: string | null;
+          removed_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          reporter_id?: string;
+          title?: string;
+          slug?: string;
+          description?: string | null;
+          cover_media_id?: string | null;
+          location_id?: string | null;
+          status?: Database["public"]["Enums"]["investigation_status"];
+          created_at?: string;
+          updated_at?: string;
+          published_at?: string | null;
+          removed_at?: string | null;
+        };
+        Relationships: [];
+      };
+      investigation_items: {
+        Row: {
+          id: string;
+          investigation_id: string;
+          report_id: string | null;
+          live_stream_id: string | null;
+          position: number;
+          added_at: string;
+        };
+        Insert: {
+          id?: string;
+          investigation_id: string;
+          report_id?: string | null;
+          live_stream_id?: string | null;
+          position: number;
+          added_at?: string;
+        };
+        Update: {
+          id?: string;
+          investigation_id?: string;
+          report_id?: string | null;
+          live_stream_id?: string | null;
+          position?: number;
+          added_at?: string;
+        };
+        Relationships: [];
+      };
       live_streams: {
         Row: {
           id: string;
@@ -561,6 +654,8 @@ export type Database = {
           last_seen_at: string | null;
           created_at: string;
           sensitive_content?: boolean;
+          viewer_count?: number | null;
+          viewer_count_checked_at?: string | null;
         };
         Insert: {
           id?: string;
@@ -578,6 +673,8 @@ export type Database = {
           last_seen_at?: string | null;
           created_at?: string;
           sensitive_content?: boolean;
+          viewer_count?: number | null;
+          viewer_count_checked_at?: string | null;
         };
         Update: {
           id?: string;
@@ -595,6 +692,8 @@ export type Database = {
           last_seen_at?: string | null;
           created_at?: string;
           sensitive_content?: boolean;
+          viewer_count?: number | null;
+          viewer_count_checked_at?: string | null;
         };
         Relationships: [];
       };
@@ -690,6 +789,7 @@ export type Database = {
     Enums: {
       coverage_request_status: "open" | "fulfilled" | "closed";
       event_status: "active" | "ended" | "archived";
+      investigation_status: "draft" | "published" | "archived";
       licensing_status: "view_only" | "licensing_available";
       media_type: "photo" | "video";
       media_provider: "cloudflare-stream" | "supabase-storage" | "local";
@@ -715,7 +815,7 @@ export type Database = {
         | "weather"
         | "community"
         | "other";
-      moderation_content_type: "firsthand_report" | "coverage_request" | "live_stream";
+      moderation_content_type: "firsthand_report" | "coverage_request" | "live_stream" | "investigation";
       moderation_reason:
         | "harassment"
         | "threats"
@@ -750,6 +850,9 @@ export type TableUpdate<T extends PublicTable> = Database["public"]["Tables"][T]
 export type Profile = TableRow<"profiles">;
 export type Location = TableRow<"locations">;
 export type EventRecord = TableRow<"events">;
+export type InvestigationRecord = TableRow<"investigations">;
+export type InvestigationItemRecord = TableRow<"investigation_items">;
+export type InvestigationStatus = Database["public"]["Enums"]["investigation_status"];
 export type EventStatus = Database["public"]["Enums"]["event_status"];
 export type CoverageRequestRecord = TableRow<"coverage_requests">;
 export type RequestInterest = TableRow<"request_interests">;
@@ -757,6 +860,7 @@ export type ReportRecord = TableRow<"reports">;
 export type ReportMedia = TableRow<"report_media">;
 export type ProfileFollow = TableRow<"profile_follows">;
 export type LocationFollow = TableRow<"location_follows">;
+export type InvestigationFollow = TableRow<"investigation_follows">;
 export type ReportSupport = TableRow<"report_supports">;
 export type ReportCorrection = TableRow<"report_corrections">;
 export type LicensingTransaction = TableRow<"licensing_transactions">;

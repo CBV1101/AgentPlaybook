@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { DiscoveryMap } from "@/components/discovery-map";
 import { LiveStreamGrid } from "@/components/live-stream-grid";
-import { ReportCard } from "@/components/report-card";
-import { RequestCard } from "@/components/request-card";
+import { YourWorldFeed } from "@/components/your-world-feed";
 import { LocationLabel } from "@/components/ui/badge";
-import { EmptyState, Notice, Page } from "@/components/ui/page";
+import { Notice, Page } from "@/components/ui/page";
 import { getFollowingPresentation } from "@/lib/following-presentation";
-import { formatRelativeTime } from "@/lib/format";
 import { requireUser } from "@/lib/require-user";
 
-export default async function FollowingPage() {
+type FollowingPageProps = {
+  searchParams: Promise<{ before?: string }>;
+};
+
+export default async function FollowingPage({ searchParams }: FollowingPageProps) {
   const user = await requireUser("/following");
-  const presentation = await getFollowingPresentation(user.id);
+  const { before } = await searchParams;
+  const presentation = await getFollowingPresentation(user.id, before);
 
   return (
     <Page width="home">
@@ -25,43 +28,39 @@ export default async function FollowingPage() {
       <p className="fh-kicker">Following</p>
       <h1 className="mt-2 fh-hero">Your window into the parts of the world you care about.</h1>
       <p className="mt-3 max-w-2xl fh-lede">
-        Live and recent firsthand activity from reporters and places you follow — not a ranked news
-        feed.
+        What&apos;s new in the parts of the world you follow — reporters, places, and investigations you chose.
       </p>
 
       {presentation.liveStreams.length > 0 ? (
-        <section className="mt-10">
+        <section className="fh-live-section mt-10">
           <div className="flex items-end justify-between gap-4">
             <div>
               <p className="fh-kicker text-live">Live from your world</p>
               <h2 className="mt-1 fh-section">Places you follow, reporting now</h2>
             </div>
             <Link href="/browse" className="shrink-0 text-sm font-medium text-ink underline underline-offset-2">
-              View all live →
+              View all →
             </Link>
           </div>
-          <div className="mt-6">
-            <LiveStreamGrid streams={presentation.liveStreams} showMore={false} />
-          </div>
+          <LiveStreamGrid streams={presentation.liveStreams} showMore={false} />
         </section>
-      ) : presentation.latestReports.length > 0 ? (
-        <section className="mt-8">
-          <p className="fh-kicker">Latest from your world</p>
-          <h2 className="mt-1 fh-section">Recent reports from places you follow</h2>
-          <p className="mt-2 fh-meta">These are published firsthand reports, not live broadcasts.</p>
-          <div className="mt-4">
-            <LiveStreamGrid reports={presentation.latestReports} showMore={false} />
-          </div>
+      ) : presentation.hasFollows || presentation.usingShowcase ? (
+        <section className="fh-live-section mt-10">
+          <p className="fh-kicker text-live">Live from your world</p>
+          <h2 className="mt-1 fh-section">Nothing live from your world right now</h2>
+          <p className="mt-2 fh-meta">Recent reporting from follows is below. Firsthand does not invent live broadcasts.</p>
         </section>
-      ) : (
-        <EmptyState title="Nothing from your follows yet.">
-          <p className="mt-2">
-            <Link href="/browse" className="underline">
-              Explore the world
-            </Link>
-          </p>
-        </EmptyState>
-      )}
+      ) : null}
+
+      <section className="fh-your-world mt-12">
+        <p className="fh-kicker">Your world</p>
+        <h2 className="mt-1 fh-section">Latest from reporters, places and investigations you follow.</h2>
+        <YourWorldFeed
+          items={presentation.feed}
+          hasMore={presentation.hasMore}
+          empty={!presentation.hasFollows && !presentation.usingShowcase}
+        />
+      </section>
 
       {presentation.cities.length > 0 ? (
         <section className="mt-10 rounded-2xl border border-geo/20 bg-geo-soft/40 p-4 sm:p-6">
@@ -80,7 +79,6 @@ export default async function FollowingPage() {
                       {[
                         city.liveCount ? `${city.liveCount} live` : null,
                         city.reportCount ? `${city.reportCount} reports` : null,
-                        city.requestCount ? `${city.requestCount} requests` : null,
                       ]
                         .filter(Boolean)
                         .join(" · ")}
@@ -92,28 +90,6 @@ export default async function FollowingPage() {
           </div>
         </section>
       ) : null}
-
-      <section className="mt-10">
-        <p className="fh-kicker">Followed activity</p>
-        <h2 className="mt-1 fh-section">Where, who, what, when</h2>
-        {presentation.feed.length === 0 ? (
-          <EmptyState title="Follow a reporter or a city archive to fill this list." />
-        ) : (
-          <ol className="mt-5 space-y-6">
-            {presentation.feed.map((item) => (
-              <li key={item.id}>
-                <p className="mb-2 fh-meta">
-                  {item.reason}
-                  {item.report?.capturedAt ? ` · ${formatRelativeTime(item.report.capturedAt)}` : null}
-                  {item.request?.createdAt && !item.report ? ` · ${formatRelativeTime(item.request.createdAt)}` : null}
-                </p>
-                {item.report ? <ReportCard report={item.report} /> : null}
-                {item.request ? <RequestCard request={item.request} /> : null}
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
     </Page>
   );
 }

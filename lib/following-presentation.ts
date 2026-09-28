@@ -1,9 +1,10 @@
 import { getFollowGraph, getFollowingFeed, listPublicLiveStreams } from "@/lib/data";
 import type { DiscoveryPlace } from "@/lib/data/discovery";
 import { applyFollowingShowcase } from "@/lib/discovery-showcase";
-import { followGraphIsEmpty, liveMatchesFollows, type FollowingFeedItem } from "@/lib/follows";
+import { followGraphIsEmpty, liveMatchesFollows } from "@/lib/follows";
 import { isActiveLiveStatus, type LiveStreamSummary } from "@/lib/live";
 import type { CoverageRequest, FirsthandReport } from "@/lib/types";
+import type { YourWorldItem } from "@/lib/your-world";
 
 export type FollowingCityActivity = {
   city: string;
@@ -19,67 +20,60 @@ export type FollowingCityActivity = {
 export type FollowingPresentation = {
   usingShowcase: boolean;
   hasFollows: boolean;
-  featuredLive: LiveStreamSummary | null;
-  otherLives: LiveStreamSummary[];
   liveStreams: LiveStreamSummary[];
-  latestReport: FirsthandReport | null;
-  latestReports: FirsthandReport[];
   cities: FollowingCityActivity[];
   places: DiscoveryPlace[];
-  feed: FollowingFeedItem[];
+  feed: YourWorldItem[];
+  hasMore: boolean;
 };
 
-export async function getFollowingPresentation(userId: string): Promise<FollowingPresentation> {
-  const [feed, graph, lives] = await Promise.all([
-    getFollowingFeed(userId),
-    getFollowGraph(userId),
-    listPublicLiveStreams(),
-  ]);
+export async function getFollowingPresentation(
+  userId: string,
+  before?: string | null,
+): Promise<FollowingPresentation> {
+  const [graph, lives] = await Promise.all([getFollowGraph(userId), listPublicLiveStreams()]);
   const hasFollows = !followGraphIsEmpty(graph);
   const followedLives = lives.filter(
     (item) => isActiveLiveStatus(item.status) && liveMatchesFollows(item, graph),
   );
-  const reports = feed.flatMap((item) => (item.report ? [item.report] : []));
-  const requests = feed.flatMap((item) => (item.request ? [item.request] : []));
-  const cities = aggregateFollowingCities(followedLives, reports, requests);
+  const liveReportIds = followedLives.flatMap((item) => (item.reportId ? [item.reportId] : []));
+  const world = await getFollowingFeed(userId, before, liveReportIds);
+  const reports = world.items.flatMap((item) =>
+    item.kind === "place-group" ? item.reports : item.report ? [item.report] : [],
+  );
+
   const real: FollowingPresentation = {
     usingShowcase: false,
     hasFollows,
-    featuredLive: followedLives[0] ?? null,
-    otherLives: followedLives.slice(1, 6),
     liveStreams: followedLives,
-    latestReport: reports[0] ?? null,
-    latestReports: recentFollowedReports(reports),
-    cities,
-    places: citiesToPlaces(cities),
-    feed,
+    cities: aggregateFollowingCities(followedLives, reports, []),
+    places: [],
+    feed: world.items,
+    hasMore: world.hasMore,
   };
+  real.places = citiesToPlaces(real.cities);
 
   const showcased = applyFollowingShowcase({
     hasFollows,
-    feed,
+    feed: world.items,
     liveStreams: followedLives,
     reports,
-    requests,
-    places: real.places,
+    before,
   });
 
   if (!showcased.usingShowcase) {
     return real;
   }
 
-  const showcaseCities = aggregateFollowingCities(showcased.liveStreams, showcased.reports, showcased.requests);
+  const showcaseCities = aggregateFollowingCities(showcased.liveStreams, showcased.reports, []);
   return {
     usingShowcase: true,
     hasFollows: false,
-    featuredLive: showcased.liveStreams[0] ?? null,
-    otherLives: showcased.liveStreams.slice(1, 6),
     liveStreams: showcased.liveStreams,
-    latestReport: showcased.reports[0] ?? null,
-    latestReports: recentFollowedReports(showcased.reports),
     cities: showcaseCities,
     places: citiesToPlaces(showcaseCities),
     feed: showcased.feed,
+    hasMore: showcased.hasMore,
   };
 }
 
@@ -154,10 +148,4 @@ function citiesToPlaces(cities: FollowingCityActivity[]): DiscoveryPlace[] {
       openRequestCount: city.requestCount,
       liveCount: city.liveCount,
     }));
-}
-
-function recentFollowedReports(reports: FirsthandReport[]) {
-  const videos = reports.filter((item) => item.mediaKind === "video");
-  const rest = reports.filter((item) => item.mediaKind !== "video");
-  return [...videos, ...rest].slice(0, 6);
 }

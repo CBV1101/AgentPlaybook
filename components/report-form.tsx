@@ -11,6 +11,8 @@ import { createReportDraft, publishReport } from "@/lib/coverage-actions";
 import { classifyUpload } from "@/lib/media/classify";
 import { requestMediaSession, transferMediaFile, type UploadProgress } from "@/lib/media/browser-upload";
 import { ALLEGATION_WARNING, PLATFORM_PUBLISHING_RULE } from "@/lib/moderation";
+import { InvestigationSelectField } from "@/components/investigation-select-field";
+import type { ReporterInvestigationOption } from "@/lib/investigations";
 import type { GeocodeSuggestion } from "@/lib/location";
 
 type ReportFormProps = {
@@ -21,6 +23,7 @@ type ReportFormProps = {
   locationLabel?: string;
   eventId?: string | null;
   error?: string;
+  investigations?: ReporterInvestigationOption[];
 };
 
 type FileItem = {
@@ -61,6 +64,7 @@ export function ReportForm({
   locationLabel,
   eventId,
   error,
+  investigations = [],
 }: ReportFormProps) {
   const router = useRouter();
   const [items, setItems] = useState<FileItem[]>([]);
@@ -162,9 +166,15 @@ export function ReportForm({
         }
       }
 
-      const published = await publishReport(reportId);
+      const investigationChoice = String(formData.get("investigation_id") || "");
+      const investigationId = investigationChoice && investigationChoice !== "__create__" ? investigationChoice : null;
+      const published = await publishReport(reportId, investigationId);
       if (!published.ok) {
         setFormError(published.error);
+        return;
+      }
+      if (investigationChoice === "__create__") {
+        router.push(`/profile/investigations/new?attach=${published.reportId}`);
         return;
       }
       router.push(`/reports/${published.reportId}`);
@@ -211,6 +221,7 @@ export function ReportForm({
       )}
 
       <EventAssociationField locationId={locationId} location={pickedLocation} defaultEventId={eventId} />
+      <InvestigationSelectField investigations={investigations} />
 
       <Field label="Description" htmlFor="description">
         <Textarea

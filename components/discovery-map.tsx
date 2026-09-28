@@ -2,6 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import type { DiscoveryPlace } from "@/lib/data/discovery";
+import {
+  DISCOVERY_MAP_MAX_BOUNDS,
+  DISCOVERY_MAP_TILE_NO_WRAP,
+  DISCOVERY_MAP_WORLD_COPY_JUMP,
+} from "@/lib/discovery-map-config";
 import "leaflet/dist/leaflet.css";
 
 type DiscoveryMapProps = {
@@ -29,12 +34,22 @@ export function DiscoveryMap({ places, compact = false, caption }: DiscoveryMapP
         return;
       }
 
+      const worldBounds = L.latLngBounds(
+        L.latLng(DISCOVERY_MAP_MAX_BOUNDS.south, DISCOVERY_MAP_MAX_BOUNDS.west),
+        L.latLng(DISCOVERY_MAP_MAX_BOUNDS.north, DISCOVERY_MAP_MAX_BOUNDS.east),
+      );
       map = L.map(containerRef.current, {
         scrollWheelZoom: false,
         attributionControl: true,
+        worldCopyJump: DISCOVERY_MAP_WORLD_COPY_JUMP,
+        maxBounds: worldBounds,
+        maxBoundsViscosity: 1,
+        minZoom: 1,
       });
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        noWrap: DISCOVERY_MAP_TILE_NO_WRAP,
+        bounds: worldBounds,
       }).addTo(map);
 
       const points = places.filter(
@@ -94,7 +109,11 @@ export function DiscoveryMap({ places, compact = false, caption }: DiscoveryMapP
 
   return (
     <div className="overflow-hidden rounded-lg border border-line bg-canvas">
-      <div ref={containerRef} className={compact ? "h-48 w-full sm:h-64" : "h-72 w-full sm:h-[28rem]"} />
+      <div
+        ref={containerRef}
+        data-world-copies="off"
+        className={compact ? "h-48 w-full sm:h-64" : "h-72 w-full sm:h-[28rem]"}
+      />
       <p className="border-t border-line bg-surface px-4 py-2 text-xs text-muted">
         {caption
           ?? (compact
