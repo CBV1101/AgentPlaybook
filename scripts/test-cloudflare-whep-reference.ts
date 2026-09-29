@@ -17,4 +17,15 @@ assert(!src.includes("BROADCAST_RTC_CONFIGURATION"), "reference client must not 
 assert(!src.includes("createDataChannel"), "reference client must not create a data channel");
 assert(!src.includes("attachWhepViewer"), "reference client must not use the Firsthand WHEP helper");
 assert(!src.includes("claimLivePreviewSlot"), "reference client must not claim a preview slot");
+
+const apiSrc = readFileSync(join(process.cwd(), "app/api/dev/cloudflare-whep-test/route.ts"), "utf8");
+assert(apiSrc.includes("getDevReferenceWhepPlaybackUrl"), "DEV API must use Firsthand live-row discovery");
+assert(!apiSrc.includes("getConnectedCloudflareWhepPlaybackUrl"), "DEV API must not select by list connected heuristic");
+
+const discoverySrc = readFileSync(join(process.cwd(), "lib/live/dev-whep-discovery.ts"), "utf8");
+assert(discoverySrc.includes('.eq("status", "live")'), "discovery must use the current Firsthand live broadcast");
+assert(discoverySrc.includes("getCloudflareLiveInput"), "discovery must GET the exact Live Input");
+assert(discoverySrc.includes("resolveCloudflareLiveWhepUrl"), "discovery must use webRTCPlayback.url from that GET");
+assert(!discoverySrc.includes("isCloudflareLiveInputConnected(item.status)"), "discovery must not filter the list for connected");
+
 console.log("cloudflare WHEP reference client tests passed");

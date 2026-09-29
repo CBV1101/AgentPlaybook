@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { LIVE_ICE_GATHER_TIMEOUT_CODE, waitForIceGatheringComplete } from "../lib/live/whip-connection";
 import { establishWhepPlayback } from "../lib/live/whep-viewer";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -17,9 +16,6 @@ class FakeWhepPeer extends EventTarget {
   localDescription: RTCSessionDescription | null = null;
   remoteDescription: RTCSessionDescription | null = null;
   offerSdp = "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=recvonly";
-  gatheredSdp =
-    "v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=recvonly\r\na=candidate:1 1 udp 1 0.0.0.0 9 typ host";
-  holdGathering = false;
   createdDataChannels = 0;
 
   createDataChannel() {
@@ -34,26 +30,12 @@ class FakeWhepPeer extends EventTarget {
   async setLocalDescription(desc: RTCSessionDescriptionInit) {
     this.localDescription = {
       type: desc.type ?? "offer",
-      sdp: this.offerSdp,
+      sdp: desc.sdp ?? this.offerSdp,
       toJSON() {
         return { type: this.type, sdp: this.sdp };
       },
     } as RTCSessionDescription;
     this.iceGatheringState = "gathering";
-    if (this.holdGathering) {
-      return;
-    }
-    queueMicrotask(() => {
-      this.localDescription = {
-        type: "offer",
-        sdp: this.gatheredSdp,
-        toJSON() {
-          return { type: this.type, sdp: this.sdp };
-        },
-      } as RTCSessionDescription;
-      this.iceGatheringState = "complete";
-      this.dispatchEvent(new Event("icegatheringstatechange"));
-    });
   }
 
   async setRemoteDescription(desc?: RTCSessionDescriptionInit) {
@@ -69,79 +51,32 @@ class FakeWhepPeer extends EventTarget {
 
 async function run() {
   const whepSrc = readFileSync(join(process.cwd(), "lib/live/whep-viewer.ts"), "utf8");
-  assert(whepSrc.includes("waitForIceGatheringComplete"), "WHEP keeps waitForIceGatheringComplete (timeout-reject)");
+  assert(whepSrc.includes("new RTCPeerConnection()"), "production WHEP must use an empty RTCPeerConnection");
+  assert(!whepSrc.includes("BROADCAST_RTC_CONFIGURATION"), "production WHEP must not use WHIP STUN config");
+  assert(!whepSrc.includes("waitForIceGatheringComplete"), "production WHEP must not wait for ICE complete");
   assert(!whepSrc.includes("waitForWhipIceGathering"), "WHEP must not use the WHIP ICE wait");
-  assert(whepSrc.includes("establishWhepPlayback"), "WHEP signaling is isolated for tests");
-  assert(whepSrc.includes("BROADCAST_RTC_CONFIGURATION"), "WHEP must use the same RTCConfiguration as WHIP");
+  assert(!whepSrc.includes("createDataChannel"), "production WHEP must not create a data channel");
   assert(whepSrc.includes('addTransceiver("video", { direction: "recvonly" })'), "WHEP must request recvonly video");
-  assert(whepSrc.includes("createDataChannel"), "WHEP must create a local ICE component before the offer");
-  assert(
-    whepSrc.indexOf("attachIceCandidateDiagnostics") < whepSrc.indexOf("setLocalDescription"),
-    "WHEP ICE candidate listeners must attach before setLocalDescription",
-  );
-  assert(
-    whepSrc.indexOf("waitForIceGatheringOrAbort") < whepSrc.lastIndexOf("setLocalDescription"),
-    "WHEP ICE wait listeners must attach before setLocalDescription",
-  );
+  assert(whepSrc.includes('addTransceiver("audio", { direction: "recvonly" })'), "WHEP must request recvonly audio");
+  assert(whepSrc.includes("body: offer.sdp"), "WHEP must POST offer.sdp immediately");
+  assert(whepSrc.includes("stream.addTrack(event.track)"), "WHEP ontrack must add the remote track to the local stream");
+  const establishIdx = whepSrc.indexOf("export async function establishWhepPlayback");
+  const postIdx = whepSrc.indexOf("method: \"POST\"", establishIdx);
+  assert(whepSrc.lastIndexOf("setLocalDescription", postIdx) < postIdx, "setLocalDescription must happen before WHEP POST");
+  assert(!whepSrc.slice(establishIdx, postIdx).includes("waitFor"), "WHEP must not wait between setLocalDescription and POST");
+
   const whipSrc = readFileSync(join(process.cwd(), "lib/live/whip-connection.ts"), "utf8");
-  assert(whipSrc.includes("export function waitForWhepIceGathering"), "WHEP timeout-reject helper remains");
-  assert(whipSrc.includes("export function waitForWhipIceGathering"), "WHIP timeout-resolve helper is separate");
-  assert(whipSrc.includes("BROADCAST_RTC_CONFIGURATION"), "WHIP uses the shared RTCConfiguration");
+  assert(whipSrc.includes("export function waitForWhipIceGathering"), "WHIP ICE wait remains separate");
+  assert(whipSrc.includes("BROADCAST_RTC_CONFIGURATION"), "WHIP still uses STUN config");
   const studioSrc = readFileSync(join(process.cwd(), "components/live-studio.tsx"), "utf8");
-  assert(studioSrc.includes("addTransceiver(track, { direction: \"sendonly\" })"), "WHIP adds local sendonly tracks");
-  assert(!studioSrc.includes("createDataChannel"), "WHIP does not need a datachannel ICE kick");
-
-  const alreadyComplete = {
-    iceGatheringState: "complete" as const,
-    addEventListener() {},
-    removeEventListener() {},
-  };
-  await waitForIceGatheringComplete(alreadyComplete, 50);
-
-  const delayed = new FakeWhepPeer();
-  delayed.holdGathering = true;
-  const delayedWait = waitForIceGatheringComplete(delayed, 500);
-  globalThis.setTimeout(() => {
-    delayed.localDescription = {
-      type: "offer",
-      sdp: delayed.gatheredSdp,
-      toJSON() {
-        return { type: this.type, sdp: this.sdp };
-      },
-    } as RTCSessionDescription;
-    delayed.iceGatheringState = "complete";
-    delayed.dispatchEvent(new Event("icegatheringstatechange"));
-  }, 40);
-  await delayedWait;
-
-  let timeoutPosts = 0;
-  const timeoutPeer = new FakeWhepPeer();
-  timeoutPeer.holdGathering = true;
-  await establishWhepPlayback({
-    pc: timeoutPeer as unknown as RTCPeerConnection,
-    whepUrl: "https://example.invalid/webRTC/play",
-    iceGatherTimeoutMs: 40,
-    fetchFn: async () => {
-      timeoutPosts += 1;
-      return new Response("should-not-post", { status: 201 });
-    },
-  }).then(
-    () => {
-      throw new Error("timeout while gathering must not POST");
-    },
-    (error) => {
-      assert(error instanceof Error && error.message === LIVE_ICE_GATHER_TIMEOUT_CODE, "timeout while gathering must fail ICE wait");
-    },
-  );
-  assert(timeoutPosts === 0, "timeout while still gathering must not proceed to WHEP POST");
+  assert(studioSrc.includes("addTransceiver(track, { direction: \"sendonly\" })"), "WHIP still adds local sendonly tracks");
 
   let postedBody = "";
   let postedWhileGathering = false;
   const peer = new FakeWhepPeer();
-  await establishWhepPlayback({
+  const result = await establishWhepPlayback({
     pc: peer as unknown as RTCPeerConnection,
     whepUrl: "https://example.invalid/webRTC/play",
-    iceGatherTimeoutMs: 200,
     fetchFn: async (_url, init) => {
       postedWhileGathering = peer.iceGatheringState !== "complete";
       postedBody = String(init?.body ?? "");
@@ -151,28 +86,25 @@ async function run() {
       });
     },
   });
-  assert(!postedWhileGathering, "WHEP POST must not occur before ICE gathering completes");
-  assert(postedBody === peer.gatheredSdp, "WHEP POST must use pc.localDescription.sdp after gathering");
-  assert(postedBody !== peer.offerSdp, "WHEP POST must not use the original pre-gathering offer.sdp");
+  assert(postedWhileGathering, "Cloudflare WHEP POSTs immediately, even while ICE is still gathering");
+  assert(postedBody === peer.offerSdp, "WHEP POST must use offer.sdp");
+  assert(result.status === 201, "WHEP must accept a 201 SDP answer");
   assert(peer.remoteDescription?.sdp === "v=0-answer", "WHEP answer is applied after POST");
-  assert(peer.createdDataChannels === 1, "WHEP creates one local data channel before the offer");
+  assert(peer.createdDataChannels === 0, "WHEP must not create a data channel");
 
   let abortedPosts = 0;
   const hanging = new FakeWhepPeer();
-  hanging.holdGathering = true;
   const abort = new AbortController();
-  const pending = establishWhepPlayback({
+  abort.abort();
+  await establishWhepPlayback({
     pc: hanging as unknown as RTCPeerConnection,
     whepUrl: "https://example.invalid/webRTC/play",
-    iceGatherTimeoutMs: 5_000,
     signal: abort.signal,
     fetchFn: async () => {
       abortedPosts += 1;
       return new Response("should-not-post", { status: 201 });
     },
-  });
-  abort.abort();
-  await pending.then(
+  }).then(
     () => {
       throw new Error("aborted WHEP must not POST");
     },

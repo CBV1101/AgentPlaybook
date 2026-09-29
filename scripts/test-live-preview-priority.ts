@@ -311,12 +311,13 @@ function run() {
   assert(previewSrc.includes("tryClaimLivePreviewSlot"), "home/location LivePreview uses exclusive per-stream slots");
   assert(!previewSrc.includes("if (playingIds.has(id)) {\n    return true;"), "same stream.id must not grant a second WHEP slot");
   const whepSrc = readFileSync(join(root, "lib/live/whep-viewer.ts"), "utf8");
-  assert(whepSrc.includes("mediaStreamForRemoteTrack"), "WHEP reassigns srcObject from the remote ontrack stream");
-  assert(whepSrc.includes("video.srcObject = stream"), "Safari receives srcObject after remote tracks, not only an empty MediaStream");
+  assert(whepSrc.includes("new RTCPeerConnection()"), "production WHEP matches the empty-PC reference client");
+  assert(whepSrc.includes("video.srcObject = stream"), "WHEP assigns srcObject before remote tracks, matching the reference client");
+  assert(whepSrc.includes("stream.addTrack(event.track)"), "WHEP ontrack adds the remote track to that stream");
   assert(whepSrc.includes("method: \"DELETE\""), "WHEP cleanup ends the playback session");
-  assert(whepSrc.includes("PRE-WHEP-POST iceGatheringState"), "WHEP logs PRE-WHEP-POST gathering state");
-  assert(whepSrc.includes('iceGatheringState !== "complete"'), "WHEP refuses POST unless ICE gathering is complete");
-  assert(whepSrc.includes("localDescription?.sdp"), "WHEP posts the gathered localDescription");
+  assert(whepSrc.includes("body: offer.sdp"), "WHEP posts offer.sdp immediately");
+  assert(!whepSrc.includes('iceGatheringState !== "complete"'), "WHEP must not refuse POST until ICE gathering is complete");
+  assert(!whepSrc.includes("waitForIceGatheringComplete"), "WHEP must not wait for ICE complete");
   const whipSrc = readFileSync(join(root, "lib/live/whip-connection.ts"), "utf8");
   assert(whipSrc.includes("establishWhipBroadcast"), "WHIP publishing file is untouched by this viewer task");
 

@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  BROADCAST_RTC_CONFIGURATION,
-  LIVE_ICE_GATHER_TIMEOUT_MS,
-  waitForIceGatheringComplete,
-} from "@/lib/live/whip-connection";
-import { attachIceCandidateDiagnostics, logRtcPeerConnectionConfig } from "@/lib/live/whep-ice";
-import { mediaStreamForRemoteTrack, summarizeRtcTransport, summarizeSdp } from "@/lib/live/whep-stats";
+import { summarizeRtcTransport, summarizeSdp } from "@/lib/live/whep-stats";
 
 function logWhep(message: string) {
   if (process.env.NODE_ENV !== "development") {
@@ -80,65 +74,31 @@ function throwIfAborted(signal?: AbortSignal) {
   }
 }
 
-async function waitForIceGatheringOrAbort(
-  pc: RTCPeerConnection,
-  signal: AbortSignal | undefined,
-  timeoutMs: number,
-) {
-  throwIfAborted(signal);
-  await waitForIceGatheringComplete(pc, timeoutMs, signal);
-}
-
 export async function establishWhepPlayback(input: {
   pc: RTCPeerConnection;
   whepUrl: string;
   fetchFn?: typeof fetch;
-  iceGatherTimeoutMs?: number;
   signal?: AbortSignal;
   logStates?: (reason: string) => void;
 }) {
   const fetchFn = input.fetchFn ?? fetch;
   const logStates = input.logStates ?? (() => undefined);
-  attachIceCandidateDiagnostics(input.pc, logWhep);
-  if (typeof input.pc.createDataChannel === "function") {
-    input.pc.createDataChannel("whep-ice");
-    logWhep("local ICE component: datachannel");
-  }
+  throwIfAborted(input.signal);
   const offer = await input.pc.createOffer();
   logWhep("Offer created");
   logSdp("OFFER createOffer", offer.sdp);
   throwIfAborted(input.signal);
-  const gathering = waitForIceGatheringOrAbort(
-    input.pc,
-    input.signal,
-    input.iceGatherTimeoutMs ?? LIVE_ICE_GATHER_TIMEOUT_MS,
-  );
   await input.pc.setLocalDescription(offer);
   logWhep("Local description: set");
   logStates("setLocalDescription");
-  logSdp("OFFER localDescription before ICE", input.pc.localDescription?.sdp);
-  await gathering;
+  logWhep(`iceGatheringState at POST: ${input.pc.iceGatheringState}`);
+  logSdp("OFFER posted", offer.sdp);
   throwIfAborted(input.signal);
-  logStates("ice-gather-complete");
-  const sdp = input.pc.localDescription?.sdp;
-  if (!sdp) {
-    throw new Error("Could not connect to the live player.");
-  }
-  const candidateCount = summarizeSdp(sdp).iceCandidateCount;
-  logWhep(`PRE-WHEP-POST iceGatheringState=${input.pc.iceGatheringState}`);
-  logWhep(`PRE-WHEP-POST candidateCount=${candidateCount}`);
-  if (input.pc.iceGatheringState !== "complete") {
-    logWhep("PRE-WHEP-POST blocked: ICE gathering is not complete");
-    throw new Error("Could not connect to the live player.");
-  }
-  logSdp("OFFER posted", sdp);
-  logWhep(`SDP candidates present before POST: ${candidateCount > 0 ? "yes" : "no"}`);
-  logWhep(`OFFER posted before ICE complete: no`);
 
   const response = await fetchFn(input.whepUrl, {
     method: "POST",
     headers: { "Content-Type": "application/sdp" },
-    body: sdp,
+    body: offer.sdp,
     signal: input.signal,
   });
   logWhep(`WHEP signaling: ${signalingStatus(response.status)}`);
@@ -165,9 +125,12 @@ export async function attachWhepViewer(input: {
   signal?: AbortSignal;
 }) {
   logWhep("Peer connection: new");
-  logRtcPeerConnectionConfig(BROADCAST_RTC_CONFIGURATION, logWhep);
-  const pc = new RTCPeerConnection(BROADCAST_RTC_CONFIGURATION);
-  const media = new MediaStream();
+  const pc = new RTCPeerConnection();
+  pc.addTransceiver("video", { direction: "recvonly" });
+  pc.addTransceiver("audio", { direction: "recvonly" });
+
+  const stream = new MediaStream();
+  input.video.srcObject = stream;
   let stateSeq = 0;
   const logPeerStates = (reason: string) => {
     stateSeq += 1;
@@ -176,11 +139,8 @@ export async function attachWhepViewer(input: {
     );
   };
 
-  pc.addTransceiver("video", { direction: "recvonly" });
-  pc.addTransceiver("audio", { direction: "recvonly" });
   pc.ontrack = (event) => {
-    const stream = mediaStreamForRemoteTrack(media, event.streams, event.track);
-    input.video.srcObject = stream;
+    stream.addTrack(event.track);
     logWhep(`Remote track: ${event.track.kind}`);
     logPeerStates(`ontrack-${event.track.kind}`);
     void input.video.play().catch(() => undefined);

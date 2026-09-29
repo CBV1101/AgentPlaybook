@@ -135,7 +135,43 @@ export async function getCloudflareLiveViewerCount(uid: string): Promise<number 
   return null;
 }
 
-export async function getConnectedCloudflareWhepPlaybackUrl() {
+export function summarizeCloudflareLiveInputStatus(status: unknown) {
+  if (status == null) {
+    return { present: "no" as const, kind: "none" as const, connectedHelper: false, state: "none", currentState: "none", keys: "none" };
+  }
+  if (typeof status === "string") {
+    return {
+      present: "yes" as const,
+      kind: "string" as const,
+      connectedHelper: isCloudflareLiveInputConnected(status),
+      state: status.trim().toLowerCase() || "none",
+      currentState: "none",
+      keys: "none",
+    };
+  }
+  if (typeof status === "object") {
+    const row = status as Record<string, unknown>;
+    const current = row.current && typeof row.current === "object" ? (row.current as Record<string, unknown>) : null;
+    return {
+      present: "yes" as const,
+      kind: "object" as const,
+      connectedHelper: isCloudflareLiveInputConnected(status),
+      state: String(row.state ?? "none"),
+      currentState: String(current?.state ?? "none"),
+      keys: Object.keys(row).join(",") || "none",
+    };
+  }
+  return {
+    present: "yes" as const,
+    kind: "other" as const,
+    connectedHelper: false,
+    state: "none",
+    currentState: "none",
+    keys: "none",
+  };
+}
+
+export async function listCloudflareLiveInputsForDev() {
   const response = await streamFetch("/stream/live_inputs");
   const payload = (await response.json()) as {
     success?: boolean;
@@ -150,16 +186,13 @@ export async function getConnectedCloudflareWhepPlaybackUrl() {
     : Array.isArray(payload.result?.liveInputs)
       ? payload.result.liveInputs
       : [];
-  for (const item of rows) {
-    if (!isCloudflareLiveInputConnected(item.status)) {
-      continue;
-    }
-    const url = item.webRTCPlayback?.url?.trim() ?? "";
-    if (url.startsWith("https://") && url.includes("/webRTC/play") && !url.includes("/webRTC/publish")) {
-      return url;
-    }
-  }
-  return null;
+  return rows.map((item) => ({
+    id: item.uid ?? "none",
+    enabled: item.enabled !== false,
+    status: summarizeCloudflareLiveInputStatus(item.status),
+    webRTCPlaybackObject: item.webRTCPlayback ? "yes" : "no",
+    webRTCPlaybackUrl: item.webRTCPlayback?.url ? "yes" : "no",
+  }));
 }
 
 export async function getCloudflareLiveInput(uid: string) {
@@ -180,6 +213,8 @@ export async function getCloudflareLiveInput(uid: string) {
     uid: payload.result.uid,
     connected: isCloudflareLiveInputConnected(status),
     enabled: payload.result.enabled !== false,
+    statusSummary: summarizeCloudflareLiveInputStatus(status),
+    webRTCPlaybackPresent: Boolean(payload.result.webRTCPlayback),
     whipUrl: payload.result.webRTC?.url ?? null,
     whepUrl: payload.result.webRTCPlayback?.url ?? null,
     playbackHls: payload.result.playback?.hls ?? null,
