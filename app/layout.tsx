@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Source_Sans_3 } from "next/font/google";
 import { SiteHeader } from "@/components/site-header";
 import { LocalModeBanner } from "@/components/local-mode-banner";
+import { assertProductionSupabaseConfig } from "@/lib/data/mode";
 import "./globals.css";
 
 const sans = Source_Sans_3({
@@ -15,6 +16,8 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = "force-dynamic";
+
+assertProductionSupabaseConfig();
 
 export default function RootLayout({
   children,

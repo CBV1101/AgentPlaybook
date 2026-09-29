@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { one, toLocationSummary, toReport, REPORT_FEED_SELECT, type ReportJoinRow } from "@/lib/data/mappers";
+import { one, toLocationSummary, REPORT_FEED_SELECT, type ReportJoinRow } from "@/lib/data/mappers";
+import { deliverReports, deliverStoredPhotoFields } from "@/lib/data/report-delivery";
+import { canViewReportMedia } from "@/lib/media/visibility";
 import { supabaseListPublicLiveStreams } from "@/lib/data/supabase/live-repository";
 import type { InvestigationItemRecord, InvestigationRecord, InvestigationStatus, Location } from "@/lib/database.types";
 import type { Database } from "@/lib/database.types";
@@ -25,10 +27,40 @@ async function loadCoverUrl(coverMediaId: string | null) {
   const supabase = await createClient();
   const { data } = await supabase
     .from("report_media")
-    .select("thumbnail_url, media_url")
+    .select("provider, provider_asset_id, thumbnail_url, media_url, reports(id, publish_status, removed_at, created_by)")
     .eq("id", coverMediaId)
     .maybeSingle();
-  return data?.thumbnail_url || data?.media_url || null;
+  if (!data) {
+    return null;
+  }
+  const report = one(
+    data.reports as
+      | { id?: string; publish_status?: string | null; removed_at?: string | null; created_by?: string | null }
+      | { id?: string; publish_status?: string | null; removed_at?: string | null; created_by?: string | null }[]
+      | null,
+  );
+  const allowed = canViewReportMedia({
+    publishStatus: report?.publish_status,
+    removedAt: report?.removed_at,
+    ownerId: report?.created_by,
+    viewerId: null,
+  });
+  if (!report?.id || !report.created_by) {
+    return null;
+  }
+  const [delivered] = await deliverStoredPhotoFields(
+    [
+      {
+        provider: data.provider,
+        provider_asset_id: data.provider_asset_id,
+        media_url: data.media_url,
+        thumbnail_url: data.thumbnail_url,
+      },
+    ],
+    allowed,
+    { ownerId: report.created_by, reportId: report.id },
+  );
+  return delivered.thumbnail_url || delivered.media_url || null;
 }
 
 async function summaryFor(row: InvestigationRecord): Promise<InvestigationSummary> {
@@ -167,22 +199,25 @@ async function buildPage(row: InvestigationRecord, includePrivate: boolean): Pro
   const { data: reportRows } = reportIds.length
     ? await supabase.from("reports").select(REPORT_FEED_SELECT).in("id", reportIds)
     : { data: [] as ReportJoinRow[] };
-  const reports = new Map(((reportRows ?? []) as ReportJoinRow[]).map((item) => [item.id, item]));
+  const reportMap = new Map(((reportRows ?? []) as ReportJoinRow[]).map((item) => [item.id, item]));
+  const deliveredReports = await deliverReports([...reportMap.values()], includePrivate ? { id: row.reporter_id } : {});
+  const deliveredById = new Map(deliveredReports.map((item) => [item.id, item]));
 
   const parts = items.flatMap((item) => {
     const live = streams.find(
       (stream) => stream.id === item.live_stream_id || (item.report_id && stream.reportId === item.report_id),
     ) ?? null;
     if (item.report_id) {
-      const joined = reports.get(item.report_id);
-      if (!joined) {
+      const joined = reportMap.get(item.report_id);
+      const report = deliveredById.get(item.report_id);
+      if (!joined || !report) {
         return [];
       }
       const visible = !joined.removed_at && joined.publish_status !== "draft";
       if (!visible && !includePrivate) {
         return [];
       }
-      return [partFromReport(item, toReport(joined), live)];
+      return [partFromReport(item, report, live)];
     }
     if (live) {
       const part = partFromLiveOnly(item, live);
@@ -391,9 +426,10 @@ export async function supabaseEligibleInvestigationContent(userId: string) {
     .eq("created_by", userId)
     .is("removed_at", null)
     .eq("publish_status", "published");
-  const reports: FirsthandReport[] = ((reportRows ?? []) as ReportJoinRow[])
-    .filter((item) => !usedReports.has(item.id))
-    .map(toReport);
+  const reports: FirsthandReport[] = await deliverReports(
+    ((reportRows ?? []) as ReportJoinRow[]).filter((item) => !usedReports.has(item.id)),
+    { id: userId },
+  );
   const liveStreams = (await supabaseListPublicLiveStreams({ reporterId: userId, includeEnded: true })).filter(
     (item) => !usedLive.has(item.id) && (!item.reportId || !usedReports.has(item.reportId)),
   );

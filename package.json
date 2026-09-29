@@ -11,6 +11,10 @@
     "test:discovery-map": "node scripts/test-discovery-map.mjs",
     "test:your-world": "npx tsx scripts/test-your-world.ts",
     "test:location-live": "npx tsx scripts/test-location-live.ts",
+    "test:data-source": "npx tsx scripts/test-data-source.ts",
+    "test:media-upload": "npx tsx scripts/test-media-upload.ts",
+    "test:media-authorization": "npx tsx scripts/test-media-authorization.ts",
+    "verify:report-images-storage": "npx tsx scripts/verify-report-images-storage.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

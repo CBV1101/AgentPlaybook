@@ -43,6 +43,7 @@ const errorCopy: Record<string, string> = {
   allegation: "Acknowledge the warning about allegations before publishing.",
   licensing: "Choose whether this media is view only or available for licensing.",
   profile: "Finish your reporter profile before publishing.",
+  upload: "Upload failed. Please try again.",
 };
 
 function fileItem(file: File): FileItem {
@@ -158,10 +159,12 @@ export function ReportForm({
       for (const item of pending) {
         try {
           await uploadOne(item, reportId, capturedIso, licensingStatus);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Upload failed.";
-          updateItem(item.id, { error: message, progress: { label: "Failed", percent: null } });
-          setFormError(message);
+        } catch {
+          updateItem(item.id, {
+            error: "Upload failed. Please try again.",
+            progress: { label: "Failed", percent: null },
+          });
+          setFormError("upload");
           return;
         }
       }
@@ -250,7 +253,7 @@ export function ReportForm({
         <legend className="text-sm font-medium text-ink">Video / photo upload</legend>
         <p className="mt-1 fh-meta">
           Upload media you created or captured. Large videos go straight to Cloudflare Stream (or local
-          storage in mock mode) and never pass through the Firsthand application server. Firsthand
+          storage when FIRSTHAND_USE_MOCK is on) and never pass through the Firsthand application server. Firsthand
           records that you said you captured this media. It does not determine whether the file is
           authentic or the report is true.
         </p>

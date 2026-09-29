@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import { one, toCoverageRequest, toLocationSummary, toReport, REPORT_FEED_SELECT, type ReportJoinRow, type RequestJoinRow } from "@/lib/data/mappers";
+import { one, toCoverageRequest, toLocationSummary, REPORT_FEED_SELECT, type ReportJoinRow, type RequestJoinRow } from "@/lib/data/mappers";
+import { deliverReports } from "@/lib/data/report-delivery";
 import { buildGeographyIndex, searchGeographyHits } from "@/lib/data/geography";
 import { summarizeEvents } from "@/lib/data/events";
 import type { EventRecord, Location, Profile } from "@/lib/database.types";
@@ -141,7 +142,7 @@ async function searchReports(term: string, locationIds: string[], since: string 
     return [];
   }
   const { data } = await supabase.from("reports").select(REPORT_FEED_SELECT).in("id", ids);
-  return ((data ?? []) as ReportJoinRow[]).map(toReport);
+  return deliverReports((data ?? []) as ReportJoinRow[]);
 }
 
 async function searchRequests(term: string, locationIds: string[], currentUserId?: string | null) {

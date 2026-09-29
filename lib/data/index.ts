@@ -1,4 +1,6 @@
 import { isMockMode } from "@/lib/data/mode";
+// Data source is chosen once in getDataSource(). Failures in Supabase repositories
+// must throw or return empty results — never import mock functions as a fallback.
 import {
   mockCreateEvent,
   mockGetEventPage,
@@ -100,7 +102,6 @@ import {
   supabaseCreateCoverageRequest,
   supabaseCreateReport,
   supabaseCreateMediaSession,
-  supabaseCompleteLocalMedia,
   supabaseRefreshVideoStatus,
   supabaseMarkMediaStatus,
   supabaseCompleteImageMedia,
@@ -410,7 +411,10 @@ export async function completeLocalMediaUpload(input: {
   filename: string;
   bytes: Uint8Array;
 }) {
-  return isMockMode() ? mockCompleteLocalMedia(input) : supabaseCompleteLocalMedia(input);
+  if (!isMockMode()) {
+    throw new Error("Local media storage is not available.");
+  }
+  return mockCompleteLocalMedia(input);
 }
 
 export async function refreshVideoMediaStatus(userId: string, mediaId: string) {
@@ -427,10 +431,10 @@ export async function markMediaUploadStatus(
     : supabaseMarkMediaStatus(userId, mediaId, status);
 }
 
-export async function completeImageMediaUpload(userId: string, mediaId: string, publicUrl: string) {
+export async function completeImageMediaUpload(userId: string, mediaId: string, publicUrl?: string) {
   return isMockMode()
-    ? mockCompleteImageMedia(userId, mediaId, publicUrl)
-    : supabaseCompleteImageMedia(userId, mediaId, publicUrl);
+    ? mockCompleteImageMedia(userId, mediaId, publicUrl ?? "")
+    : supabaseCompleteImageMedia(userId, mediaId);
 }
 
 export async function publishReportRecord(userId: string, reportId: string, investigationId?: string | null) {

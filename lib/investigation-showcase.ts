@@ -3,6 +3,7 @@
  * Never imported by mutations, auth, or RLS. Never writes to Supabase.
  */
 
+import { canUseShowcaseData, type DataSourceEnv } from "@/lib/data/mode";
 import { assembleReporterProfilePage, type ReporterProfilePage } from "@/lib/data/reporter";
 import type { Profile } from "@/lib/database.types";
 import { cityHref } from "@/lib/geo";
@@ -19,8 +20,8 @@ import type { FirsthandReport, LocationSummary } from "@/lib/types";
 export const INVESTIGATION_SHOWCASE_PREFIX = "dev-showcase-";
 export const SHOWCASE_REPORTER_USERNAME = "amorgan";
 
-export function isInvestigationShowcaseAllowed() {
-  return process.env.NODE_ENV === "development";
+export function isInvestigationShowcaseAllowed(env: DataSourceEnv = process.env) {
+  return canUseShowcaseData(env);
 }
 
 function loc(city: string, country: string, lat: number, lng: number, place?: string): LocationSummary {
@@ -424,8 +425,11 @@ export function showcaseInvestigationLatestUpdates() {
   }));
 }
 
-export function applyPublishedInvestigationsShowcase(real: InvestigationSummary[]) {
-  if (!isInvestigationShowcaseAllowed()) {
+export function applyPublishedInvestigationsShowcase(
+  real: InvestigationSummary[],
+  env: DataSourceEnv = process.env,
+) {
+  if (!isInvestigationShowcaseAllowed(env)) {
     return { investigations: real, usingShowcase: false };
   }
   if (real.length > 0) {
@@ -438,11 +442,12 @@ export function applyInvestigationShowcasePage(
   username: string,
   slug: string,
   real: InvestigationPageData | null,
+  env: DataSourceEnv = process.env,
 ): InvestigationPageData | null {
   if (real) {
     return real;
   }
-  if (!isInvestigationShowcaseAllowed()) {
+  if (!isInvestigationShowcaseAllowed(env)) {
     return null;
   }
   if (username === SHOWCASE_REPORTER_USERNAME && slug === "fraud-investigation-minnesota") {
@@ -463,15 +468,19 @@ function showcaseProfileForUsername(username: string): Profile | null {
   return reporters.find((item) => item.username === username) ?? null;
 }
 
-export function applyShowcaseReporterProfile(username: string, real: ReporterProfilePage | null): ReporterProfilePage | null {
+export function applyShowcaseReporterProfile(
+  username: string,
+  real: ReporterProfilePage | null,
+  env: DataSourceEnv = process.env,
+): ReporterProfilePage | null {
   const extras = showcaseInvestigationsForUsername(username);
   if (real) {
-    if (isInvestigationShowcaseAllowed() && extras.length > 0 && real.investigations.length === 0) {
+    if (isInvestigationShowcaseAllowed(env) && extras.length > 0 && real.investigations.length === 0) {
       return { ...real, investigations: extras };
     }
     return real;
   }
-  if (!isInvestigationShowcaseAllowed()) {
+  if (!isInvestigationShowcaseAllowed(env)) {
     return null;
   }
   const profile = showcaseProfileForUsername(username);

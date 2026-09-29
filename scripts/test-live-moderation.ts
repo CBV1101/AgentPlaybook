@@ -1,7 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isMockMode } from "../lib/data/mode";
-import { isSupabaseConfigured } from "../lib/supabase/env";
 import {
   mockCreateLiveStream,
   mockGetReportPage,
@@ -46,10 +44,6 @@ async function run() {
 
   try {
     writeMockDatabase(createSeedDatabase());
-
-    if (!isSupabaseConfigured()) {
-      assert(isMockMode(), "local mode without Supabase credentials must use the mock store");
-    }
 
     assert(
       !/verified|fact-?check|true or complete finding/i.test(SENSITIVE_CONTENT_WARNING),

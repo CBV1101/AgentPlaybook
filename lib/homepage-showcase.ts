@@ -10,13 +10,14 @@
  * - Records are presentation objects only. IDs use the `dev-showcase-` prefix
  *   so they cannot be mistaken for persisted rows.
  * - `applyHomepageShowcase` returns the real homepage payload unchanged unless
- *   `process.env.NODE_ENV === "development"` AND the real payload has no
- *   meaningful activity.
+ *   `canUseShowcaseData()` is true AND the real payload has fewer than
+ *   MIN_DEV_LIVE_GRID_STREAMS live streams.
  * - Production builds must never substitute this content. Next inlines
  *   NODE_ENV, so the showcase branch is dead in production.
  */
 
 import type { DiscoveryPlace } from "@/lib/data/discovery";
+import { canUseShowcaseData, type DataSourceEnv } from "@/lib/data/mode";
 import type { CityBrowse } from "@/lib/data/geography";
 import { assembleReporterProfilePage, type ReporterProfilePage } from "@/lib/data/reporter";
 import type { Profile } from "@/lib/database.types";
@@ -40,8 +41,8 @@ export function isHomepageShowcaseId(id: string) {
   return id.startsWith(HOMEPAGE_SHOWCASE_ID_PREFIX);
 }
 
-export function isHomepageShowcaseAllowed() {
-  return process.env.NODE_ENV === "development";
+export function isHomepageShowcaseAllowed(env: DataSourceEnv = process.env) {
+  return canUseShowcaseData(env);
 }
 
 export const MIN_DEV_LIVE_GRID_STREAMS = 6;
@@ -64,15 +65,18 @@ export function homepageHasMeaningfulActivity(input: {
   );
 }
 
-export function applyHomepageShowcase(input: {
-  liveStreams: LiveStreamSummary[];
-  requests: CoverageRequest[];
-  reports: FirsthandReport[];
-  places: DiscoveryPlace[];
-  events: EventSummary[];
-  cities: CityBrowse[];
-}): HomepagePresentation {
-  if (!isHomepageShowcaseAllowed()) {
+export function applyHomepageShowcase(
+  input: {
+    liveStreams: LiveStreamSummary[];
+    requests: CoverageRequest[];
+    reports: FirsthandReport[];
+    places: DiscoveryPlace[];
+    events: EventSummary[];
+    cities: CityBrowse[];
+  },
+  env: DataSourceEnv = process.env,
+): HomepagePresentation {
+  if (!isHomepageShowcaseAllowed(env)) {
     return { ...input, usingShowcase: false };
   }
   const showcase = buildHomepageShowcase();
@@ -314,8 +318,9 @@ function cityRow(
 export function applyHomepageLiveReporterShowcase(
   username: string,
   real: ReporterProfilePage | null,
+  env: DataSourceEnv = process.env,
 ): ReporterProfilePage | null {
-  if (!isHomepageShowcaseAllowed()) {
+  if (!isHomepageShowcaseAllowed(env)) {
     return real;
   }
   const content = getHomepageShowcaseContent();

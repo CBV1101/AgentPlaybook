@@ -7,7 +7,8 @@ export function LocalModeBanner() {
 
   return (
     <div className="border-b border-line bg-warn-soft px-4 py-2 text-center text-sm text-ink">
-      Local mock data is on. Sign up and publish work on this machine until you add Supabase keys.
+      Local mock data is on because FIRSTHAND_USE_MOCK is set. This store is development-only and
+      cannot run in production.
     </div>
   );
 }

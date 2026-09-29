@@ -1,6 +1,7 @@
 import * as tus from "tus-js-client";
 import type { MediaUploadSession } from "@/lib/media/types";
 import { sha256File } from "@/lib/media/provenance";
+import { USER_UPLOAD_FAILED_MESSAGE } from "@/lib/media/limits";
 
 export type UploadProgress = {
   label: string;
@@ -130,13 +131,22 @@ export async function transferMediaFile(
   }
 
   if (session.protocol === "supabase") {
-    await xhrPut(file, session.uploadUrl, session.contentType || file.type, track);
+    try {
+      await xhrPut(file, session.uploadUrl, session.contentType || file.type, track);
+    } catch (error) {
+      await postJson("/api/media/status", { mediaId: session.mediaId, status: "failed" }).catch(() => undefined);
+      throw error instanceof Error ? error : new Error(USER_UPLOAD_FAILED_MESSAGE);
+    }
     await postJson("/api/media/image-complete", {
       mediaId: session.mediaId,
-      publicUrl: session.publicUrl,
     });
     onProgress({ label: "Ready", percent: 100 });
     return;
+  }
+
+  if (session.protocol !== "local") {
+    await postJson("/api/media/status", { mediaId: session.mediaId, status: "failed" }).catch(() => undefined);
+    throw new Error(USER_UPLOAD_FAILED_MESSAGE);
   }
 
   const body = new FormData();

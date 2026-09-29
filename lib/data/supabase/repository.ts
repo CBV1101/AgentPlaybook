@@ -1,6 +1,7 @@
-import { randomUUID } from "node:crypto";
 import { findMatchingLocation, nextLocationSlug, slugForLocation } from "@/lib/data/locations";
-import { one, toCoverageRequest, toLocationSummary, toReport, REPORT_FEED_SELECT, type ReportJoinRow, type RequestJoinRow } from "@/lib/data/mappers";
+import { one, toCoverageRequest, toLocationSummary, REPORT_FEED_SELECT, type ReportJoinRow, type RequestJoinRow } from "@/lib/data/mappers";
+import { deliverReports, deliverStoredPhotoFields } from "@/lib/data/report-delivery";
+import { canViewReportMedia } from "@/lib/media/visibility";
 import type { StructuredLocation } from "@/lib/location";
 import {
   createCloudflareBasicUpload,
@@ -8,12 +9,14 @@ import {
   getCloudflareStreamVideo,
   isCloudflareStreamConfigured,
 } from "@/lib/media/cloudflare-stream";
-import { writeLocalMediaFile } from "@/lib/media/local";
+import { chooseRecordedMediaBackend } from "@/lib/media/local-mode";
+import { logMediaStorageFailure } from "@/lib/media/log";
+import { USER_UPLOAD_FAILED_MESSAGE } from "@/lib/media/limits";
 import { pendingMediaUrl, preferTus } from "@/lib/media/status";
 import { removeSupabaseReporterAvatar, uploadSupabaseReporterAvatar } from "@/lib/media/supabase-avatar";
-import { sha256Hex } from "@/lib/media/hash";
 import { uploadProvenanceFields } from "@/lib/media/provenance";
 import { createSupabaseImageUpload, hashSupabaseImageObject } from "@/lib/media/supabase-signed";
+import { reportMediaIdentityUrl } from "@/lib/media/supabase-images";
 import type { CreateMediaSessionInput, MediaUploadSession } from "@/lib/media/types";
 import { assembleReporterProfilePage } from "@/lib/data/reporter";
 import { aggregateDiscoveryPlaces, type DiscoveryPlace } from "@/lib/data/discovery";
@@ -41,6 +44,7 @@ import { citySlug } from "@/lib/geo";
 import { assertEventAttachable } from "@/lib/events";
 import type { EventPageData, EventReporter, EventSummary } from "@/lib/types";
 import { createClient } from "@/lib/supabase/server";
+import { getDataSource } from "@/lib/data/mode";
 import {
   supabaseListPublicLiveStreams,
   supabaseLiveLocationIds,
@@ -73,7 +77,7 @@ export async function supabaseGetHomeFeed() {
   return {
     source: "supabase" as const,
     requests: homepageCoverageWanted(wanted, 8),
-    reports: ((reportRows ?? []) as ReportJoinRow[]).map(toReport),
+    reports: await deliverReports((reportRows ?? []) as ReportJoinRow[]),
     places: await supabaseDiscoveryPlaces(),
     activeEvents: await supabaseListActiveEvents(),
     liveStreams: await supabaseListPublicLiveStreams(),
@@ -222,7 +226,7 @@ async function supabaseReportsForLocations(locationIds: string[], limit: number)
     .eq("publish_status", "published")
     .order("uploaded_at", { ascending: false })
     .limit(limit);
-  return ((data ?? []) as ReportJoinRow[]).map(toReport);
+  return deliverReports((data ?? []) as ReportJoinRow[]);
 }
 
 async function supabaseRequestsForLocations(locationIds: string[], currentUserId?: string | null) {
@@ -285,14 +289,12 @@ export async function supabaseSearchCoverage(query: string, currentUserId?: stri
       (item) => item.title.toLowerCase().includes(needle) || item.location.toLowerCase().includes(needle),
     )
     .sort((a, b) => b.supporterCount - a.supporterCount || b.createdAt.localeCompare(a.createdAt));
-  const reports = ((reportRows ?? []) as ReportJoinRow[])
-    .map(toReport)
-    .filter(
-      (item) =>
-        item.title.toLowerCase().includes(needle) ||
-        item.location.toLowerCase().includes(needle) ||
-        item.excerpt.toLowerCase().includes(needle),
-    );
+  const reports = (await deliverReports((reportRows ?? []) as ReportJoinRow[])).filter(
+    (item) =>
+      item.title.toLowerCase().includes(needle) ||
+      item.location.toLowerCase().includes(needle) ||
+      item.excerpt.toLowerCase().includes(needle),
+  );
 
   return { source: "supabase" as const, places, requests, reports };
 }
@@ -336,9 +338,12 @@ export async function supabaseGetPlacePageData(slug: string, currentUserId?: str
     toCoverageRequest(row, currentUserId),
   );
   const supportByRequest = new Map(requests.map((item) => [item.id, item.supporterCount]));
-  const reports = ((reportRows ?? []) as ReportJoinRow[]).map((row) => ({
-    ...toReport(row),
-    requestSupporterCount: row.request_id ? (supportByRequest.get(row.request_id) ?? 0) : 0,
+  const reportRowsTyped = (reportRows ?? []) as ReportJoinRow[];
+  const reports = (await deliverReports(reportRowsTyped)).map((report, index) => ({
+    ...report,
+    requestSupporterCount: reportRowsTyped[index]?.request_id
+      ? (supportByRequest.get(reportRowsTyped[index].request_id ?? "") ?? 0)
+      : 0,
   }));
 
   return {
@@ -385,7 +390,7 @@ export async function supabaseGetCoverageRequestPage(id: string, currentUserId?:
     },
     removedAt: (request as { removed_at?: string | null }).removed_at ?? null,
     location: toLocationSummary(location),
-    reports: ((reportRows ?? []) as ReportJoinRow[]).map(toReport),
+    reports: await deliverReports((reportRows ?? []) as ReportJoinRow[]),
     interestedUserIds: (request.request_interests ?? []).map((row) => row.user_id),
     currentUserId: currentUserId ?? null,
     event: await supabaseLinkedEvent(request.event_id),
@@ -406,6 +411,12 @@ export async function supabaseGetReportPage(id: string, currentUserId?: string |
   }
   if (data.publish_status === "draft" && data.created_by !== currentUserId) {
     return null;
+  }
+
+  let isAdmin = false;
+  if (currentUserId) {
+    const { data: roleRow } = await supabase.from("profiles").select("role").eq("id", currentUserId).maybeSingle();
+    isAdmin = roleRow?.role === "admin";
   }
 
   const location = one(data.locations);
@@ -429,7 +440,22 @@ export async function supabaseGetReportPage(id: string, currentUserId?: string |
     report_media: NonNullable<ReportJoinRow["report_media"]>;
   };
 
-  const mapped = toReport(joined);
+  const viewer = { id: currentUserId, isAdmin };
+  const [mapped] = await deliverReports([joined], viewer);
+  const mediaAllowed = canViewReportMedia({
+    publishStatus: data.publish_status,
+    removedAt: data.removed_at,
+    ownerId: data.created_by,
+    viewerId: currentUserId,
+    isAdmin,
+  });
+  const readyMedia = ((data.report_media ?? []) as ReportMedia[]).filter((item) => {
+    return !item.upload_status || item.upload_status === "ready";
+  });
+  const media = await deliverStoredPhotoFields(readyMedia, mediaAllowed, {
+    ownerId: data.created_by,
+    reportId: data.id,
+  });
   const [{ data: supports }, { count: supportCount }, { data: live }, followingReporter] = await Promise.all([
     currentUserId
       ? supabase.from("report_supports").select("id").eq("report_id", id).eq("user_id", currentUserId).maybeSingle()
@@ -449,9 +475,7 @@ export async function supabaseGetReportPage(id: string, currentUserId?: string |
     location: toLocationSummary(location),
     requestId: joined.request_id,
     requestTitle: request?.title ?? one(joined.coverage_requests)?.title ?? null,
-    media: ((data.report_media ?? []) as ReportMedia[]).filter((item) => {
-      return !item.upload_status || item.upload_status === "ready";
-    }),
+    media,
     licensingStatus: joined.licensing_status,
     reporterUsername: profile?.username ?? "reporter",
     reporterDisplayName: profile?.display_name ?? "Anonymous reporter",
@@ -671,8 +695,35 @@ export async function supabaseCreateMediaSession(input: CreateMediaSessionInput)
   const report = await supabaseOwnedReport(input.reportId, input.userId);
   const supabase = await createClient();
   const provenance = uploadProvenanceFields(input.originalSha256);
+  const backend = chooseRecordedMediaBackend({
+    mediaType: input.mediaType,
+    dataSource: getDataSource(),
+    cloudflareStreamConfigured: isCloudflareStreamConfigured(),
+  });
+  if ("error" in backend) {
+    logMediaStorageFailure(
+      {
+        operation: "chooseRecordedMediaBackend",
+        reportId: input.reportId,
+        mediaType: input.mediaType,
+      },
+      new Error(backend.error),
+    );
+    throw new Error(USER_UPLOAD_FAILED_MESSAGE);
+  }
+  if (backend.backend === "local") {
+    logMediaStorageFailure(
+      {
+        operation: "supabaseCreateMediaSession",
+        reportId: input.reportId,
+        mediaType: input.mediaType,
+      },
+      new Error("local protocol is not allowed in supabase mode"),
+    );
+    throw new Error(USER_UPLOAD_FAILED_MESSAGE);
+  }
 
-  if (input.mediaType === "video" && isCloudflareStreamConfigured()) {
+  if (input.mediaType === "video" && backend.backend === "cloudflare-stream") {
     const created = preferTus(input.fileSize)
       ? await createCloudflareTusUpload({
           filename: input.filename,
@@ -704,7 +755,7 @@ export async function supabaseCreateMediaSession(input: CreateMediaSessionInput)
       .select("id")
       .single();
     if (error || !data) {
-      throw new Error(error?.message || "Could not start the video upload.");
+      throw new Error(error?.message || USER_UPLOAD_FAILED_MESSAGE);
     }
     return {
       mediaId: data.id,
@@ -716,108 +767,69 @@ export async function supabaseCreateMediaSession(input: CreateMediaSessionInput)
     };
   }
 
-  if (input.mediaType === "photo" && process.env.NEXT_PUBLIC_SUPABASE_URL) {
-    try {
-      const signed = await createSupabaseImageUpload({
-        userId: input.userId,
+  let signed;
+  try {
+    signed = await createSupabaseImageUpload({
+      userId: input.userId,
+      reportId: input.reportId,
+      filename: input.filename,
+      contentType: input.contentType,
+    });
+  } catch (error) {
+    logMediaStorageFailure(
+      {
+        operation: "createSupabaseImageUpload",
         reportId: input.reportId,
-        filename: input.filename,
-        contentType: input.contentType,
-      });
-      const { data, error } = await supabase
-        .from("report_media")
-        .insert({
-          report_id: report.id,
-          media_type: "photo",
-          media_url: signed.publicUrl,
-          thumbnail_url: signed.publicUrl,
-          original_filename: input.filename,
-          captured_at: input.capturedAt || report.captured_at,
-          licensing_status: input.licensingStatus,
-          provider: "supabase-storage",
-          provider_asset_id: signed.path,
-          upload_status: "pending",
-          ...provenance,
-        })
-        .select("id")
-        .single();
-      if (!error && data) {
-        return {
-          mediaId: data.id,
-          protocol: "supabase" as const,
-          uploadUrl: signed.signedUrl,
-          token: signed.token,
-          path: signed.path,
-          publicUrl: signed.publicUrl,
-          provider: "supabase-storage" as const,
-          providerAssetId: signed.path,
-          contentType: signed.contentType,
-        };
-      }
-    } catch {
-      // Fall through to the local upload path if Storage is unavailable.
-    }
+        mediaType: "photo",
+      },
+      error,
+    );
+    throw new Error(USER_UPLOAD_FAILED_MESSAGE);
   }
 
-  const assetId = randomUUID();
   const { data, error } = await supabase
     .from("report_media")
     .insert({
       report_id: report.id,
-      media_type: input.mediaType,
-      media_url: pendingMediaUrl(input.mediaType, assetId),
-      thumbnail_url: null,
+      media_type: "photo",
+      media_url: signed.publicUrl,
+      thumbnail_url: signed.publicUrl,
       original_filename: input.filename,
       captured_at: input.capturedAt || report.captured_at,
       licensing_status: input.licensingStatus,
-      provider: "local",
-      provider_asset_id: assetId,
+      provider: "supabase-storage",
+      provider_asset_id: signed.path,
       upload_status: "pending",
       ...provenance,
     })
     .select("id")
     .single();
   if (error || !data) {
-    throw new Error(error?.message || "Could not start the media upload.");
+    logMediaStorageFailure(
+      {
+        operation: "report_media.insert",
+        reportId: input.reportId,
+        mediaType: "photo",
+      },
+      error ?? new Error("empty insert"),
+    );
+    throw new Error(USER_UPLOAD_FAILED_MESSAGE);
   }
   return {
     mediaId: data.id,
-    protocol: "local",
-    uploadUrl: "/api/media/local-upload",
-    provider: "local",
-    providerAssetId: assetId,
-    contentType: input.contentType,
+    protocol: "supabase" as const,
+    uploadUrl: signed.signedUrl,
+    token: signed.token,
+    path: signed.path,
+    publicUrl: signed.publicUrl,
+    provider: "supabase-storage" as const,
+    providerAssetId: signed.path,
+    contentType: signed.contentType,
   };
 }
 
-export async function supabaseCompleteLocalMedia(input: {
-  userId: string;
-  mediaId: string;
-  filename: string;
-  bytes: Uint8Array;
-}) {
-  const media = await supabaseOwnedMedia(input.mediaId, input.userId);
-  const stored = await writeLocalMediaFile({
-    bytes: input.bytes,
-    filename: input.filename,
-    mediaType: media.media_type,
-  });
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("report_media")
-    .update({
-      media_url: stored.mediaUrl,
-      thumbnail_url: stored.thumbnailUrl,
-      upload_status: "ready",
-      uploaded_at: new Date().toISOString(),
-      original_filename: input.filename,
-      original_sha256: sha256Hex(input.bytes),
-    })
-    .eq("id", input.mediaId);
-  if (error) {
-    throw new Error(error.message);
-  }
-  return { reportId: media.report_id, mediaId: input.mediaId };
+export async function supabaseCompleteLocalMedia(): Promise<{ reportId: string; mediaId: string }> {
+  throw new Error("Local media storage is not available.");
 }
 
 export async function supabaseRefreshVideoStatus(userId: string, mediaId: string) {
@@ -855,21 +867,36 @@ export async function supabaseMarkMediaStatus(
   }
 }
 
-export async function supabaseCompleteImageMedia(userId: string, mediaId: string, publicUrl: string) {
+export async function supabaseCompleteImageMedia(userId: string, mediaId: string) {
   const media = await supabaseOwnedMedia(mediaId, userId);
-  const storedHash =
-    media.provider === "supabase-storage" && media.provider_asset_id
-      ? await hashSupabaseImageObject(media.provider_asset_id)
-      : null;
+  if (media.provider !== "supabase-storage" || !media.provider_asset_id) {
+    throw new Error(USER_UPLOAD_FAILED_MESSAGE);
+  }
+  const identity = reportMediaIdentityUrl(media.provider_asset_id);
+  const storedHash = await hashSupabaseImageObject(media.provider_asset_id);
+  if (!storedHash) {
+    logMediaStorageFailure(
+      {
+        operation: "download",
+        mediaId,
+        reportId: media.report_id,
+        mediaType: "photo",
+      },
+      new Error("storage object missing after upload"),
+    );
+    const supabase = await createClient();
+    await supabase.from("report_media").update({ upload_status: "failed" }).eq("id", mediaId);
+    throw new Error(USER_UPLOAD_FAILED_MESSAGE);
+  }
   const supabase = await createClient();
   const { error } = await supabase
     .from("report_media")
     .update({
-      media_url: publicUrl,
-      thumbnail_url: publicUrl,
+      media_url: identity,
+      thumbnail_url: identity,
       upload_status: "ready",
       uploaded_at: new Date().toISOString(),
-      original_sha256: storedHash ?? media.original_sha256,
+      original_sha256: storedHash,
     })
     .eq("id", mediaId);
   if (error) {
@@ -929,7 +956,7 @@ async function supabaseAssembleProfile(profile: NonNullable<Awaited<ReturnType<t
     .order("uploaded_at", { ascending: false });
 
   const rows = (reportRows ?? []) as ReportJoinRow[];
-  const reports = rows.map(toReport);
+  const reports = await deliverReports(rows);
   const locationsById = new Map(
     rows.flatMap((row) => {
       const location = one(row.locations);
@@ -1430,14 +1457,16 @@ export async function supabaseGetFollowingFeed(
     });
   }
 
-  const rows = ((reportRows ?? []) as Array<ReportJoinRow & { created_by: string }>).flatMap((row) => {
+  const joinRows = (reportRows ?? []) as Array<ReportJoinRow & { created_by: string }>;
+  const delivered = await deliverReports(joinRows);
+  const rows = joinRows.flatMap((row, index) => {
     const location = one(row.locations);
     if (!location) {
       return [];
     }
     return [
       {
-        report: toReport(row),
+        report: delivered[index]!,
         createdBy: row.created_by,
         location: toLocationSummary(location),
         investigation: investigationByReport.get(row.id) ?? null,
@@ -1745,7 +1774,7 @@ export async function supabaseGetEventPage(id: string, currentUserId?: string | 
       .order("created_at", { ascending: false }),
   ]);
 
-  const reports = ((reportRows ?? []) as ReportJoinRow[]).map(toReport);
+  const reports = await deliverReports((reportRows ?? []) as ReportJoinRow[]);
   const requests = ((requestRows ?? []) as RequestJoinRow[]).map((row) => toCoverageRequest(row, currentUserId));
   const reporterMap = new Map<string, EventReporter>();
   for (const row of reportRows ?? []) {

@@ -2,6 +2,7 @@ import type { Location, Profile, ReportMedia } from "@/lib/database.types";
 import { locationArchiveHref } from "@/lib/geo";
 import { formatLocationLabel } from "@/lib/location";
 import { formatWhenUtc } from "@/lib/format";
+import { reportImageStoragePath } from "@/lib/media/supabase-images";
 import type { CoverageRequest, CoverageRequestStatus, FirsthandReport, LocationSummary } from "@/lib/types";
 
 export type LocationRow = Pick<
@@ -28,6 +29,7 @@ export type ReportJoinRow = {
   description: string | null;
   uploaded_at: string;
   captured_at: string;
+  created_by?: string | null;
   request_id: string | null;
   location_id: string;
   licensing_status?: "view_only" | "licensing_available";
@@ -41,7 +43,7 @@ export type ReportJoinRow = {
     | null;
   report_media:
     | (Pick<ReportMedia, "media_type" | "media_url" | "thumbnail_url"> &
-        Partial<Pick<ReportMedia, "id" | "original_filename">>)[]
+        Partial<Pick<ReportMedia, "id" | "original_filename" | "provider" | "provider_asset_id">>)[]
     | null;
   coverage_requests?:
     | { title: string; request_interests?: { id: string }[] | null }
@@ -50,7 +52,7 @@ export type ReportJoinRow = {
 };
 
 export const REPORT_FEED_SELECT =
-  "id, title, description, uploaded_at, captured_at, request_id, location_id, licensing_status, removed_at, publish_status, locations(*), profiles(display_name, username, avatar_url), report_media(media_type, media_url, thumbnail_url, original_filename), coverage_requests(title, request_interests(id))";
+  "id, title, description, uploaded_at, captured_at, created_by, request_id, location_id, licensing_status, removed_at, publish_status, locations(*), profiles(display_name, username, avatar_url), report_media(media_type, media_url, thumbnail_url, original_filename, provider, provider_asset_id), coverage_requests(title, request_interests(id))";
 
 export function one<T>(value: T | T[] | null | undefined): T | null {
   if (!value) {
@@ -133,11 +135,23 @@ export function toReport(row: ReportJoinRow): FirsthandReport {
     respondsToRequest: Boolean(row.request_id),
     requestSupporterCount: request?.request_interests?.length,
     recordedLive: isRecordedLiveReport(row.description, media),
-    thumbnailUrl: media.find((item) => item.thumbnail_url || item.media_type === "photo")?.thumbnail_url
-      || media.find((item) => item.media_type === "photo")?.media_url
-      || null,
+    thumbnailUrl: thumbnailForReport(media),
     mediaUrl: media.find((item) => item.media_type === "video" && item.media_url)?.media_url ?? null,
   };
+}
+
+function thumbnailForReport(
+  media: NonNullable<ReportJoinRow["report_media"]>,
+) {
+  const photo = media.find((item) => item.media_type === "photo");
+  if (photo && reportImageStoragePath(photo)) {
+    return null;
+  }
+  return (
+    media.find((item) => item.thumbnail_url || item.media_type === "photo")?.thumbnail_url ||
+    media.find((item) => item.media_type === "photo")?.media_url ||
+    null
+  );
 }
 
 export function isRecordedLiveReport(

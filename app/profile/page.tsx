@@ -33,8 +33,7 @@ export default async function ProfilePage({ searchParams }: ProfilePageProps) {
 
       {isMockMode() ? (
         <Notice>
-          You are using a local mock account. Adding Supabase keys later will switch auth to the live
-          project without changing these screens.
+          You are using a local mock account (FIRSTHAND_USE_MOCK). Production never uses this store.
         </Notice>
       ) : null}
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { classifyUpload } from "@/lib/media/classify";
 import { jsonError, requireUploadUser } from "@/lib/media/http";
+import { USER_UPLOAD_FAILED_MESSAGE } from "@/lib/media/limits";
 import { parseOriginalSha256 } from "@/lib/media/provenance";
 import { createMediaUploadSession } from "@/lib/data";
 
@@ -43,7 +44,7 @@ export async function POST(request: Request) {
       originalSha256: parseOriginalSha256(body.originalSha256),
     });
     return NextResponse.json(session);
-  } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Could not start the video upload.", 400);
+  } catch {
+    return jsonError(USER_UPLOAD_FAILED_MESSAGE, 400);
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
+import { assertProductionSupabaseConfig } from "@/lib/data/mode";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/env";
 import { loginPath, safeNextPath } from "@/lib/paths";
@@ -32,6 +33,8 @@ export async function GET(request: Request) {
   if (providerError) {
     return NextResponse.redirect(new URL(withAuthError(loginPath(next), providerError), origin));
   }
+
+  assertProductionSupabaseConfig();
 
   if (!isSupabaseConfigured()) {
     return NextResponse.redirect(new URL(loginPath(next), origin));

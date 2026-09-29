@@ -5,6 +5,7 @@
  */
 
 import type { DiscoveryPlace } from "@/lib/data/discovery";
+import type { DataSourceEnv } from "@/lib/data/mode";
 import {
   getHomepageShowcaseContent,
   HOMEPAGE_SHOWCASE_ID_PREFIX,
@@ -141,13 +142,16 @@ function signal(
   };
 }
 
-export function applyWantedShowcase(input: {
-  requests: CoverageRequest[];
-  reports: FirsthandReport[];
-  liveStreams: LiveStreamSummary[];
-  places: DiscoveryPlace[];
-}) {
-  if (!isHomepageShowcaseAllowed()) {
+export function applyWantedShowcase(
+  input: {
+    requests: CoverageRequest[];
+    reports: FirsthandReport[];
+    liveStreams: LiveStreamSummary[];
+    places: DiscoveryPlace[];
+  },
+  env: DataSourceEnv = process.env,
+) {
+  if (!isHomepageShowcaseAllowed(env)) {
     return { ...input, opportunities: [] as CoverageOpportunity[], usingShowcase: false };
   }
   const hasReal = input.requests.length > 0 || input.liveStreams.some((item) => item.status === "live");
@@ -165,13 +169,16 @@ export function applyWantedShowcase(input: {
   };
 }
 
-export function applyExploreShowcase(input: {
-  liveStreams: LiveStreamSummary[];
-  requests: CoverageRequest[];
-  reports: FirsthandReport[];
-  places: DiscoveryPlace[];
-}) {
-  if (!isHomepageShowcaseAllowed()) {
+export function applyExploreShowcase(
+  input: {
+    liveStreams: LiveStreamSummary[];
+    requests: CoverageRequest[];
+    reports: FirsthandReport[];
+    places: DiscoveryPlace[];
+  },
+  env: DataSourceEnv = process.env,
+) {
+  if (!isHomepageShowcaseAllowed(env)) {
     return { ...input, opportunities: [] as CoverageOpportunity[], usingShowcase: false };
   }
   const hasReal =
@@ -192,14 +199,17 @@ export function applyExploreShowcase(input: {
   };
 }
 
-export function applyFollowingShowcase(input: {
-  hasFollows: boolean;
-  feed: YourWorldItem[];
-  liveStreams: LiveStreamSummary[];
-  reports: FirsthandReport[];
-  before?: string | null;
-}) {
-  if (!isHomepageShowcaseAllowed() || input.hasFollows) {
+export function applyFollowingShowcase(
+  input: {
+    hasFollows: boolean;
+    feed: YourWorldItem[];
+    liveStreams: LiveStreamSummary[];
+    reports: FirsthandReport[];
+    before?: string | null;
+  },
+  env: DataSourceEnv = process.env,
+) {
+  if (!isHomepageShowcaseAllowed(env) || input.hasFollows) {
     return { ...input, hasMore: false, usingShowcase: false };
   }
   if (input.feed.length > 0 || input.liveStreams.length > 0) {

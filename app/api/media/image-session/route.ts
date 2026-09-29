@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { classifyUpload } from "@/lib/media/classify";
 import { jsonError, requireUploadUser } from "@/lib/media/http";
+import { photoUploadRejection, USER_UPLOAD_FAILED_MESSAGE } from "@/lib/media/limits";
 import { parseOriginalSha256 } from "@/lib/media/provenance";
 import { createMediaUploadSession } from "@/lib/data";
 
@@ -23,8 +24,13 @@ export async function POST(request: Request) {
   const filename = body?.filename?.trim() ?? "";
   const contentType = body?.contentType ?? "";
   const mediaType = classifyUpload(contentType, filename);
-  if (!body?.reportId || !filename || !body.fileSize || mediaType !== "photo") {
-    return jsonError("Choose a photo to upload.");
+  const rejected = photoUploadRejection({
+    contentType,
+    filename,
+    fileSize: body?.fileSize ?? 0,
+  });
+  if (!body?.reportId || !filename || mediaType !== "photo" || rejected) {
+    return jsonError(rejected || "Choose a photo to upload.");
   }
   if (body.licensingStatus !== "view_only" && body.licensingStatus !== "licensing_available") {
     return jsonError("Choose a licensing option.");
@@ -36,14 +42,14 @@ export async function POST(request: Request) {
       reportId: body.reportId,
       mediaType: "photo",
       filename,
-      fileSize: body.fileSize,
+      fileSize: body.fileSize ?? 0,
       contentType,
       capturedAt: body.capturedAt || new Date().toISOString(),
       licensingStatus: body.licensingStatus,
       originalSha256: parseOriginalSha256(body.originalSha256),
     });
     return NextResponse.json(session);
-  } catch (error) {
-    return jsonError(error instanceof Error ? error.message : "Could not start the photo upload.", 400);
+  } catch {
+    return jsonError(USER_UPLOAD_FAILED_MESSAGE, 400);
   }
 }
