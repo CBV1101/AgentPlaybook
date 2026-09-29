@@ -249,7 +249,7 @@ export default async function PublicProfilePage({ params, searchParams }: Public
               <h2 className="fh-section">Live now</h2>
               <div className="fh-grid">
                 {page.liveNow.map((stream) => (
-                  <LiveCard key={stream.id} stream={stream} featured />
+                  <LiveCard key={stream.id} stream={stream} featured viewerSurface="profile" />
                 ))}
               </div>
             </div>

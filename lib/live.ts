@@ -79,3 +79,16 @@ export function cloudflareLiveIframeUrl(liveInputId: string, options?: { autopla
   const url = `https://iframe.cloudflarestream.com/${liveInputId}`;
   return autoplay ? `${url}?autoplay=${autoplay}` : url;
 }
+
+export function withLivePreviewIframeParams(playbackUrl: string, options: { autoplay: boolean; muted: boolean }) {
+  const url = new URL(playbackUrl);
+  if (!options.autoplay) {
+    url.searchParams.set("autoplay", "false");
+  } else {
+    url.searchParams.delete("autoplay");
+  }
+  if (options.muted) {
+    url.searchParams.set("muted", "true");
+  }
+  return url.toString();
+}

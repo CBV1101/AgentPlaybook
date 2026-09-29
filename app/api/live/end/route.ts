@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { endLiveStreamRecord } from "@/lib/data";
+import { liveUserFacingMessage } from "@/lib/live/fail-closed";
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -15,9 +16,6 @@ export async function POST(request: Request) {
     const result = await endLiveStreamRecord(user.id, body.streamId);
     return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not end the live report." },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: liveUserFacingMessage(error) }, { status: 400 });
   }
 }

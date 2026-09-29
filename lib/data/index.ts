@@ -1,4 +1,4 @@
-import { isMockMode } from "@/lib/data/mode";
+import { getDataSource, isMockMode } from "@/lib/data/mode";
 // Data source is chosen once in getDataSource(). Failures in Supabase repositories
 // must throw or return empty results — never import mock functions as a fallback.
 import {
@@ -189,12 +189,14 @@ import {
 import type { InvestigationStatus } from "@/lib/database.types";
 import type { EventSummary } from "@/lib/types";
 import type { LiveStreamSummary } from "@/lib/live";
+import { isTracedLiveTitle, logLivePublicTrace } from "@/lib/live/public-trace";
 import type { GeoFollowTarget } from "@/lib/follows";
 import type { LicensingInquiryStatus } from "@/lib/licensing";
 import type { StructuredLocation } from "@/lib/location";
 import type { NotificationPreferences, NotificationRecord } from "@/lib/notifications";
 
 export async function getHomeFeed(currentUserId?: string | null) {
+  logLivePublicTrace(`home data source: ${getDataSource()}`);
   return isMockMode() ? mockGetHomeFeed(currentUserId) : supabaseGetHomeFeed();
 }
 
@@ -597,7 +599,9 @@ export async function endLiveStreamRecord(userId: string, streamId: string) {
     return result;
   }
   const result = await supabaseEndLiveStream(userId, streamId);
-  await supabaseLinkLiveRecordingToInvestigation(streamId, result.reportId);
+  if (result.reportId) {
+    await supabaseLinkLiveRecordingToInvestigation(streamId, result.reportId);
+  }
   return result;
 }
 

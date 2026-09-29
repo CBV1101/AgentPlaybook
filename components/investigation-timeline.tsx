@@ -55,7 +55,7 @@ export function InvestigationTimeline({
               <div className="mt-2 max-w-md">
                 {part.liveNow && part.liveStream ? (
                   <div className="overflow-hidden rounded-md">
-                    <LivePreview stream={part.liveStream} autoplay={!part.liveStream.sensitiveContent} variant="globeThumbnail" />
+                    <LivePreview stream={part.liveStream} autoplay={!part.liveStream.sensitiveContent} variant="globeThumbnail" viewerSurface="location" />
                   </div>
                 ) : (
                   <Link href={part.href} className="block overflow-hidden rounded-md bg-ink">

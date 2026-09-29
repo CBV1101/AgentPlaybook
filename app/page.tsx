@@ -12,6 +12,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { applyHomepageShowcase } from "@/lib/homepage-showcase";
 import { applyPublishedInvestigationsShowcase } from "@/lib/investigation-showcase";
 import { rankLiveNow } from "@/lib/live-rank";
+import { isTracedLiveTitle, logLivePublicTrace } from "@/lib/live/public-trace";
 import { getBrowseOverview, getHomeFeed, listPublishedInvestigations } from "@/lib/queries";
 
 export default async function Home() {
@@ -31,6 +32,9 @@ export default async function Home() {
     cities: overview.cities,
   });
   const rankedLive = rankLiveNow(presentation.liveStreams, presentation.requests, presentation.events);
+  logLivePublicTrace(
+    `LivePreview input test: ${rankedLive.some((item) => isTracedLiveTitle(item.stream.title)) ? "yes" : "no"}`,
+  );
   const cities = presentation.cities.slice(0, 10);
   const investigations = applyPublishedInvestigationsShowcase(publishedInvestigations);
 

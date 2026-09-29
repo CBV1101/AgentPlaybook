@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { markLiveStreamStatus } from "@/lib/data";
+import { liveUserFacingMessage } from "@/lib/live/fail-closed";
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -15,9 +16,6 @@ export async function POST(request: Request) {
     await markLiveStreamStatus(user.id, body.streamId, "live");
     return NextResponse.json({ status: "live" });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Could not mark the stream live." },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: liveUserFacingMessage(error) }, { status: 400 });
   }
 }

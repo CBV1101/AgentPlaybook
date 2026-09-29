@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ErrorState, Notice } from "@/components/ui/page";
+import { useEffect } from "react";
+import { LiveWhepVideo } from "@/components/live-whep-video";
+import { Notice } from "@/components/ui/page";
 import type { LiveStreamSummary } from "@/lib/live";
+import { liveViewerSelectedRenderer, logFirsthandViewer } from "@/lib/live/viewer-render";
 
 type LivePlayerProps = {
   stream: LiveStreamSummary;
@@ -10,45 +12,16 @@ type LivePlayerProps = {
 };
 
 export function LivePlayer({ stream, allowAutoplay = true }: LivePlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [error, setError] = useState("");
+  const selected = liveViewerSelectedRenderer(stream);
 
   useEffect(() => {
-    if (stream.playbackKind !== "whep" || !stream.playbackUrl || !videoRef.current) {
-      return;
-    }
-    const video = videoRef.current;
-    const pc = new RTCPeerConnection();
-    const media = new MediaStream();
-    video.srcObject = media;
-    pc.addTransceiver("video", { direction: "recvonly" });
-    pc.addTransceiver("audio", { direction: "recvonly" });
-    pc.ontrack = (event) => media.addTrack(event.track);
-
-    void (async () => {
-      try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        const response = await fetch(stream.playbackUrl!, {
-          method: "POST",
-          headers: { "Content-Type": "application/sdp" },
-          body: offer.sdp,
-        });
-        if (!response.ok) {
-          throw new Error("Could not connect to the live player.");
-        }
-        const answer = await response.text();
-        await pc.setRemoteDescription({ type: "answer", sdp: answer });
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Playback failed.");
-      }
-    })();
-
-    return () => {
-      pc.close();
-      video.srcObject = null;
-    };
-  }, [stream.playbackKind, stream.playbackUrl]);
+    logFirsthandViewer({
+      surface: "full",
+      stream,
+      selected,
+      whepMounted: selected === "whep",
+    });
+  }, [selected, stream]);
 
   if (stream.status === "created") {
     return (
@@ -77,7 +50,18 @@ export function LivePlayer({ stream, allowAutoplay = true }: LivePlayerProps) {
     }
   }
 
-  if (stream.playbackKind === "iframe" && stream.playbackUrl) {
+  if (selected === "whep" && stream.playbackUrl) {
+    return (
+      <div className="relative">
+        <LiveWhepVideo
+          playbackUrl={stream.playbackUrl}
+          className="aspect-video w-full rounded-lg border border-line bg-black"
+        />
+      </div>
+    );
+  }
+
+  if (selected === "iframe" && stream.playbackUrl) {
     return (
       <iframe
         src={stream.playbackUrl}
@@ -89,7 +73,7 @@ export function LivePlayer({ stream, allowAutoplay = true }: LivePlayerProps) {
     );
   }
 
-  if (stream.playbackKind === "file" && stream.playbackUrl) {
+  if (selected === "file" && stream.playbackUrl) {
     return (
       <video
         src={stream.playbackUrl}
@@ -103,18 +87,21 @@ export function LivePlayer({ stream, allowAutoplay = true }: LivePlayerProps) {
     );
   }
 
-  if (stream.playbackKind === "whep" && stream.playbackUrl) {
+  if (stream.status === "ended" && !stream.playbackUrl) {
     return (
-      <div>
-        <video
-          ref={videoRef}
-          autoPlay={allowAutoplay}
-          playsInline
-          controls
-          className="aspect-video w-full rounded-lg border border-line bg-black"
-        />
-        {error ? <ErrorState>{error}</ErrorState> : null}
-      </div>
+      <Notice>
+        A recording of this live firsthand report is not available.
+      </Notice>
+    );
+  }
+
+  if (stream.status === "live") {
+    return (
+      <Notice>
+        {process.env.NODE_ENV === "development"
+          ? "Live playback is unavailable. WHEP was selected; the Cloudflare iframe is not used."
+          : "This live firsthand report cannot be played right now."}
+      </Notice>
     );
   }
 

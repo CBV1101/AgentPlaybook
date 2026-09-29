@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field, TextInput } from "@/components/ui/field";
 import { ErrorState, Notice } from "@/components/ui/page";
 import { createLiveStream } from "@/lib/live-actions";
+import { LIVE_UNAVAILABLE_USER_MESSAGE } from "@/lib/live/fail-closed";
 import { LIVE_STREAM_PUBLISHING_RULES } from "@/lib/moderation";
 import { InvestigationSelectField } from "@/components/investigation-select-field";
 import type { ReporterInvestigationOption } from "@/lib/investigations";
@@ -15,6 +16,7 @@ import type { GeocodeSuggestion } from "@/lib/location";
 const errorCopy: Record<string, string> = {
   title: "Add a title for this live firsthand report.",
   location: "Search for a place and choose a result before going live.",
+  "live-unavailable": LIVE_UNAVAILABLE_USER_MESSAGE,
   "live-privilege": "Live streaming is temporarily disabled for this account.",
 };
 

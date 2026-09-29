@@ -79,10 +79,10 @@ export async function createLiveStream(formData: FormData) {
     if (isRedirectError(error)) {
       throw error;
     }
-    const message = error instanceof Error ? error.message : "Could not start a live report.";
+    const message = error instanceof Error ? error.message : "";
     if (message === "live-privilege") {
       redirect(`${fallback}${fallback.includes("?") ? "&" : "?"}error=live-privilege`);
     }
-    redirect(`${fallback}${fallback.includes("?") ? "&" : "?"}error=${encodeURIComponent(message === "location" ? "location" : message)}`);
+    redirect(`${fallback}${fallback.includes("?") ? "&" : "?"}error=live-unavailable`);
   }
 }

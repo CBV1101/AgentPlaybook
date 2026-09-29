@@ -19,7 +19,11 @@ export function classifyUpload(contentType: string, filename: string): "photo" |
 }
 
 export function isCloudflareStreamEmbed(url: string) {
-  return url.includes("iframe.cloudflarestream.com") || url.includes("videodelivery.net");
+  return (
+    url.includes("iframe.cloudflarestream.com") ||
+    url.includes("videodelivery.net") ||
+    /https:\/\/customer-[a-z0-9]+\.cloudflarestream\.com\//i.test(url)
+  );
 }
 
 export function cloudflareStreamEmbedUrl(uid: string) {

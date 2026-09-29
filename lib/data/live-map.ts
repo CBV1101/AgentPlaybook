@@ -1,10 +1,11 @@
 import type { LiveStreamRecord } from "@/lib/database.types";
+import { toLocationSummary, type LocationRow } from "@/lib/data/mappers";
+import { isPlaceholderLiveInputId, isRealCloudflareLiveInputId } from "@/lib/live/fail-closed";
 import {
   cloudflareLiveIframeUrl,
   MOCK_LIVE_SAMPLE_VIDEO,
   type LiveStreamSummary,
 } from "@/lib/live";
-import { toLocationSummary, type LocationRow } from "@/lib/data/mappers";
 
 export function toLiveStreamSummary(input: {
   row: LiveStreamRecord;
@@ -15,33 +16,35 @@ export function toLiveStreamSummary(input: {
   requestTitle?: string | null;
   thumbnailUrl?: string | null;
   includeModerationPlayback?: boolean;
+  livePlayerUrl?: string | null;
+  liveWhepUrl?: string | null;
 }): LiveStreamSummary {
   const { row } = input;
   const recordingId = row.recording_asset_id;
   const liveInputId = row.cloudflare_live_input_id;
-  const mockPlayback = !liveInputId || liveInputId.startsWith("mock-") || liveInputId.startsWith("local-");
+  const mockCatalogPlayback = Boolean(liveInputId?.startsWith("mock-"));
+  const realLiveInput = isRealCloudflareLiveInputId(liveInputId);
+  const realRecording = Boolean(recordingId) && !isPlaceholderLiveInputId(recordingId);
   const sensitive = Boolean(row.sensitive_content);
   const allowAutoplay = !sensitive;
 
   let playbackKind: LiveStreamSummary["playbackKind"] = "file";
-  let playbackUrl: string | null = MOCK_LIVE_SAMPLE_VIDEO;
+  let playbackUrl: string | null = null;
 
   const terminatedPlayback = row.status === "terminated" && Boolean(recordingId) && input.includeModerationPlayback;
 
-  if ((row.status === "ended" || terminatedPlayback) && recordingId && !mockPlayback) {
+  if ((row.status === "ended" || terminatedPlayback) && realRecording) {
     playbackKind = "iframe";
-    playbackUrl = cloudflareLiveIframeUrl(recordingId, { autoplay: allowAutoplay });
-  } else if (row.status === "live" && liveInputId && !mockPlayback) {
-    playbackKind = "iframe";
-    playbackUrl = cloudflareLiveIframeUrl(liveInputId, { autoplay: allowAutoplay });
-  } else if ((row.status === "ended" || terminatedPlayback) && recordingId && mockPlayback) {
+    playbackUrl = cloudflareLiveIframeUrl(recordingId!, { autoplay: allowAutoplay });
+  } else if (row.status === "live" && realLiveInput) {
+    playbackKind = "whep";
+    playbackUrl = input.liveWhepUrl ?? null;
+  } else if ((row.status === "ended" || terminatedPlayback) && recordingId && mockCatalogPlayback) {
     playbackKind = "file";
     playbackUrl = MOCK_LIVE_SAMPLE_VIDEO;
-  } else if (row.status === "live" && mockPlayback) {
+  } else if (row.status === "live" && mockCatalogPlayback) {
     playbackKind = "file";
     playbackUrl = MOCK_LIVE_SAMPLE_VIDEO;
-  } else {
-    playbackUrl = null;
   }
 
   if (row.status === "terminated" && !input.includeModerationPlayback) {

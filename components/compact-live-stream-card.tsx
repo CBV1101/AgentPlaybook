@@ -16,7 +16,7 @@ export function CompactLiveStreamCard({
   const live = stream.status === "live";
   return (
     <article className="fh-live-tile">
-      <LivePreview stream={stream} autoplay={live} variant="grid" />
+      <LivePreview stream={stream} autoplay={live} variant="grid" viewerSurface="home" />
       <p className="fh-place mt-2.5">
         <Link href={stream.location.href} className="hover:underline">
           {stream.location.city}, {stream.location.country}

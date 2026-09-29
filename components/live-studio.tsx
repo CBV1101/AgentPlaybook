@@ -5,7 +5,18 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/page";
 import type { LiveStreamSummary } from "@/lib/live";
+import {
+  LIVE_DISCONNECT_GRACE_MS,
+  BROADCAST_RTC_CONFIGURATION,
+  canCallLiveStart,
+  deleteWhipSession,
+  establishWhipBroadcast,
+  liveConnectionUserMessage,
+  logLiveBroadcast,
+  shouldFailBroadcastForConnectionState,
+} from "@/lib/live/whip-connection";
 import { LIVE_STREAM_PUBLISHING_RULES } from "@/lib/moderation";
+import { LIVE_STUDIO_ON_AIR_MESSAGE, liveStudioStartControl } from "@/lib/live/studio-controls";
 
 type LiveStudioProps = {
   stream: LiveStreamSummary;
@@ -22,13 +33,32 @@ export function LiveStudio({ stream }: LiveStudioProps) {
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const sessionUrlRef = useRef<string | null>(null);
   const mediaRef = useRef<MediaStream | null>(null);
+  const disconnectTimerRef = useRef<number | null>(null);
+  const disconnectedSinceRef = useRef<number | null>(null);
   const [permissionError, setPermissionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState(stream.status === "live");
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(stream.status === "live" ? LIVE_STUDIO_ON_AIR_MESSAGE : "");
+  const startControl = liveStudioStartControl({
+    live,
+    busy,
+    message,
+    streamStatus: stream.status,
+  });
+
+  useEffect(() => {
+    if (stream.status === "live") {
+      setLive(true);
+      setMessage(LIVE_STUDIO_ON_AIR_MESSAGE);
+    }
+  }, [stream.status]);
 
   useEffect(() => {
     return () => {
+      logLiveBroadcast("Studio unmount");
+      if (disconnectTimerRef.current) {
+        window.clearTimeout(disconnectTimerRef.current);
+      }
       mediaRef.current?.getTracks().forEach((track) => track.stop());
       peerRef.current?.close();
     };
@@ -47,6 +77,57 @@ export function LiveStudio({ stream }: LiveStudioProps) {
     }, 20000);
     return () => window.clearInterval(timer);
   }, [live, stream.id]);
+
+  async function markBroadcastFailed(userMessage: string) {
+    if (disconnectTimerRef.current) {
+      window.clearTimeout(disconnectTimerRef.current);
+      disconnectTimerRef.current = null;
+    }
+    await deleteWhipSession(sessionUrlRef.current);
+    sessionUrlRef.current = null;
+    peerRef.current?.close();
+    peerRef.current = null;
+    await fetch("/api/live/fail", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ streamId: stream.id }),
+    });
+    setLive(false);
+    setMessage(userMessage);
+  }
+
+  function watchPeerHealth(pc: RTCPeerConnection) {
+    pc.oniceconnectionstatechange = () => {
+      logLiveBroadcast(`ICE connection: ${pc.iceConnectionState}`);
+    };
+    pc.onconnectionstatechange = () => {
+      logLiveBroadcast(`Peer connection: ${pc.connectionState}`);
+      if (pc.connectionState === "connected") {
+        disconnectedSinceRef.current = null;
+        if (disconnectTimerRef.current) {
+          window.clearTimeout(disconnectTimerRef.current);
+          disconnectTimerRef.current = null;
+        }
+        return;
+      }
+      if (shouldFailBroadcastForConnectionState(pc.connectionState)) {
+        void markBroadcastFailed("The live connection dropped. This report is no longer marked live.");
+        return;
+      }
+      if (pc.connectionState === "disconnected") {
+        disconnectedSinceRef.current = Date.now();
+        if (disconnectTimerRef.current) {
+          window.clearTimeout(disconnectTimerRef.current);
+        }
+        disconnectTimerRef.current = window.setTimeout(() => {
+          const elapsed = disconnectedSinceRef.current ? Date.now() - disconnectedSinceRef.current : LIVE_DISCONNECT_GRACE_MS;
+          if (shouldFailBroadcastForConnectionState(pc.connectionState, elapsed)) {
+            void markBroadcastFailed("The live connection dropped. This report is no longer marked live.");
+          }
+        }, LIVE_DISCONNECT_GRACE_MS);
+      }
+    };
+  }
 
   async function enablePreview() {
     setPermissionError("");
@@ -117,39 +198,26 @@ export function LiveStudio({ stream }: LiveStudioProps) {
         throw new Error(session.error || "Could not create a broadcast session.");
       }
 
-      if (session.protocol === "webrtc" && session.whipUrl && !session.whipUrl.startsWith("mock:")) {
-        const pc = new RTCPeerConnection();
+      if (session.protocol === "webrtc") {
+        if (!session.whipUrl || session.whipUrl.startsWith("mock:")) {
+          throw new Error("live-connection-failed");
+        }
+        const pc = new RTCPeerConnection(BROADCAST_RTC_CONFIGURATION);
         peerRef.current = pc;
         mediaRef.current.getTracks().forEach((track) => {
           pc.addTransceiver(track, { direction: "sendonly" });
         });
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        const whip = await fetch(session.whipUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/sdp" },
-          body: offer.sdp,
+        const established = await establishWhipBroadcast({
+          pc,
+          whipUrl: session.whipUrl,
         });
-        if (!whip.ok) {
-          throw new Error("Cloudflare rejected the live connection.");
+        sessionUrlRef.current = established.sessionUrl;
+        if (!canCallLiveStart({ protocol: "webrtc", whipHttpOk: true, connectionState: pc.connectionState })) {
+          throw new Error("live-connection-failed");
         }
-        const answer = await whip.text();
-        await pc.setRemoteDescription({ type: "answer", sdp: answer });
-        const location = whip.headers.get("Location");
-        if (location) {
-          sessionUrlRef.current = new URL(location, session.whipUrl).toString();
-        }
-        pc.onconnectionstatechange = () => {
-          if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-            void fetch("/api/live/fail", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ streamId: stream.id }),
-            });
-            setLive(false);
-            setMessage("The live connection dropped. This report is no longer marked live.");
-          }
-        };
+        watchPeerHealth(pc);
+      } else if (session.protocol !== "mock") {
+        throw new Error("live-connection-failed");
       }
 
       const start = await fetch("/api/live/start", {
@@ -162,14 +230,9 @@ export function LiveStudio({ stream }: LiveStudioProps) {
         throw new Error(payload.error || "Could not go live.");
       }
       setLive(true);
-      setMessage("You are live. Keep this page open while broadcasting.");
+      setMessage(LIVE_STUDIO_ON_AIR_MESSAGE);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not start the broadcast.");
-      await fetch("/api/live/fail", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ streamId: stream.id }),
-      });
+      await markBroadcastFailed(liveConnectionUserMessage(error) || "Could not start the broadcast.");
     } finally {
       setBusy(false);
     }
@@ -178,10 +241,10 @@ export function LiveStudio({ stream }: LiveStudioProps) {
   async function endBroadcast() {
     setBusy(true);
     try {
-      if (sessionUrlRef.current) {
-        await fetch(sessionUrlRef.current, { method: "DELETE" }).catch(() => undefined);
-      }
+      await deleteWhipSession(sessionUrlRef.current);
+      sessionUrlRef.current = null;
       peerRef.current?.close();
+      peerRef.current = null;
       mediaRef.current?.getTracks().forEach((track) => track.stop());
       const response = await fetch("/api/live/end", {
         method: "POST",
@@ -210,19 +273,42 @@ export function LiveStudio({ stream }: LiveStudioProps) {
         className="aspect-video w-full rounded-lg border border-line bg-black"
       />
       {permissionError ? <ErrorState>{permissionError}</ErrorState> : null}
-      {message ? <p className="fh-meta">{message}</p> : null}
+      {startControl.statusMessage ? <p className="fh-meta">{startControl.statusMessage}</p> : null}
       <div className="flex flex-wrap gap-3">
         <Button type="button" variant="secondary" onClick={() => void enablePreview()}>
           Enable camera
         </Button>
-        <Button type="button" variant="live" disabled={busy || live} onClick={() => void startBroadcast()}>
-          {busy ? "Working…" : "Start broadcast"}
-        </Button>
+        {startControl.appearance === "on-air" ? (
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            aria-label="Stream is live"
+            data-studio-start="on-air"
+            className="inline-flex h-10 min-h-10 min-w-[10.5rem] cursor-not-allowed items-center justify-center rounded-md border border-line bg-canvas px-4 text-sm font-medium text-muted"
+          >
+            Stream is live
+          </button>
+        ) : (
+          <Button
+            type="button"
+            variant="live"
+            disabled={startControl.disabled}
+            aria-disabled={startControl.disabled}
+            aria-label={startControl.label}
+            data-studio-start={startControl.appearance}
+            onClick={() => void startBroadcast()}
+            className="min-w-[10.5rem]"
+          >
+            {startControl.label}
+          </Button>
+        )}
         <Button
           type="button"
-          variant="secondary"
+          variant={live ? "live" : "secondary"}
           disabled={busy || (!live && stream.status !== "live")}
           onClick={() => void endBroadcast()}
+          className="min-w-[10.5rem]"
         >
           End broadcast
         </Button>

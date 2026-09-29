@@ -68,7 +68,7 @@ export function GoingOnNow({
     >
       <div className="relative aspect-video w-full overflow-hidden rounded-t-md">
         {stream ? (
-          <LivePreview stream={stream} autoplay={!stream.sensitiveContent} variant="globeThumbnail" />
+          <LivePreview stream={stream} autoplay={!stream.sensitiveContent} variant="globeThumbnail" viewerSurface="location" />
         ) : report?.thumbnailUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={report.thumbnailUrl} alt="" className="h-full w-full object-cover" />

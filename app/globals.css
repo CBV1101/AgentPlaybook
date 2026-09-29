@@ -236,10 +236,13 @@ body {
 
 .fh-live-preview-grid > video,
 .fh-live-preview-grid > img,
+.fh-live-preview-grid > iframe,
 .fh-live-preview-thumb > video,
 .fh-live-preview-thumb > img,
+.fh-live-preview-thumb > iframe,
 .fh-live-preview-full > video,
-.fh-live-preview-full > img {
+.fh-live-preview-full > img,
+.fh-live-preview-full > iframe {
   position: absolute;
   inset: 0;
   width: 100%;

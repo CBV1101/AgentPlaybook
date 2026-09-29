@@ -9,11 +9,9 @@
  * - Never writes to Supabase, mock JSON, or any database.
  * - Records are presentation objects only. IDs use the `dev-showcase-` prefix
  *   so they cannot be mistaken for persisted rows.
- * - `applyHomepageShowcase` returns the real homepage payload unchanged unless
- *   `canUseShowcaseData()` is true AND the real payload has fewer than
- *   MIN_DEV_LIVE_GRID_STREAMS live streams.
- * - Production builds must never substitute this content. Next inlines
- *   NODE_ENV, so the showcase branch is dead in production.
+ * - `applyHomepageShowcase` may fill unused live-grid slots with development
+ *   showcase streams. Genuine currently-live streams always occupy the first
+ *   tiles. Production never receives showcase data.
  */
 
 import type { DiscoveryPlace } from "@/lib/data/discovery";
@@ -23,6 +21,7 @@ import { assembleReporterProfilePage, type ReporterProfilePage } from "@/lib/dat
 import type { Profile } from "@/lib/database.types";
 import { cityHref, citySlug, countrySlug } from "@/lib/geo";
 import { MOCK_LIVE_SAMPLE_VIDEO, type LiveStreamSummary } from "@/lib/live";
+import { isTracedLiveTitle, logLivePublicTrace } from "@/lib/live/public-trace";
 import type { CoverageRequest, EventSummary, FirsthandReport, LocationSummary } from "@/lib/types";
 
 export const HOMEPAGE_SHOWCASE_ID_PREFIX = "dev-showcase-";
@@ -65,6 +64,25 @@ export function homepageHasMeaningfulActivity(input: {
   );
 }
 
+export function mergeHomepageLiveStreams(real: LiveStreamSummary[], showcase: LiveStreamSummary[]) {
+  logLivePublicTrace(`pre-merge test: ${real.some((item) => isTracedLiveTitle(item.title)) ? "yes" : "no"}`);
+  const liveReal = real.filter((item) => item.status === "live");
+  const restReal = real.filter((item) => item.status !== "live");
+  let merged: LiveStreamSummary[];
+  if (liveReal.length === 0) {
+    merged = showcase;
+  } else if (liveReal.length >= MIN_DEV_LIVE_GRID_STREAMS) {
+    merged = real;
+  } else {
+    const taken = new Set(liveReal.map((item) => item.id));
+    const filler = showcase.filter((item) => item.status === "live" && !taken.has(item.id));
+    const need = MIN_DEV_LIVE_GRID_STREAMS - liveReal.length;
+    merged = [...liveReal, ...filler.slice(0, need), ...restReal];
+  }
+  logLivePublicTrace(`post-merge test: ${merged.some((item) => isTracedLiveTitle(item.title)) ? "yes" : "no"}`);
+  return merged;
+}
+
 export function applyHomepageShowcase(
   input: {
     liveStreams: LiveStreamSummary[];
@@ -85,7 +103,7 @@ export function applyHomepageShowcase(
     return { ...input, usingShowcase: false };
   }
   return {
-    liveStreams: showcase.liveStreams,
+    liveStreams: mergeHomepageLiveStreams(input.liveStreams, showcase.liveStreams),
     requests: input.requests.length > 0 ? input.requests : showcase.requests,
     reports: input.reports.length > 0 ? input.reports : showcase.reports,
     places: input.places.length > 0 ? input.places : showcase.places,

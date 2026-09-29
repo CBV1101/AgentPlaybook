@@ -4,24 +4,29 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { LiveBadge, LocationLabel } from "@/components/ui/badge";
 import { SensitiveContentGate } from "@/components/sensitive-content-gate";
-import { reporterProfileHref, type LiveStreamSummary } from "@/lib/live";
+import { LiveWhepVideo } from "@/components/live-whep-video";
+import { reporterProfileHref, withLivePreviewIframeParams, type LiveStreamSummary } from "@/lib/live";
+import { isCloudflareCustomerLiveIframeUrl } from "@/lib/live/customer-player";
+import {
+  livePreviewAllowsAutoplay,
+  livePreviewHasNavigationOverlay,
+  livePreviewIframeIsInteractive,
+} from "@/lib/live/preview-source";
+import { MAX_SIMULTANEOUS_PREVIEWS, releaseLivePreviewSlot, tryClaimLivePreviewSlot } from "@/lib/live/preview-slot";
+import {
+  liveViewerSelectedRenderer,
+  logFirsthandViewer,
+  type LiveViewerSurface,
+} from "@/lib/live/viewer-render";
 
-const MAX_SIMULTANEOUS_PREVIEWS = 6;
 const playingIds = new Set<string>();
 
 function claimPreview(id: string) {
-  if (playingIds.has(id)) {
-    return true;
-  }
-  if (playingIds.size >= MAX_SIMULTANEOUS_PREVIEWS) {
-    return false;
-  }
-  playingIds.add(id);
-  return true;
+  return tryClaimLivePreviewSlot(playingIds, id, MAX_SIMULTANEOUS_PREVIEWS);
 }
 
 function releasePreview(id: string) {
-  playingIds.delete(id);
+  releaseLivePreviewSlot(playingIds, id);
 }
 
 export type LivePreviewVariant = "grid" | "globeThumbnail" | "full";
@@ -42,12 +47,14 @@ export function LivePreview({
   autoplay = true,
   chrome = true,
   variant,
+  viewerSurface = "home",
 }: {
   stream: LiveStreamSummary;
   featured?: boolean;
   autoplay?: boolean;
   chrome?: boolean;
   variant: LivePreviewVariant;
+  viewerSurface?: LiveViewerSurface;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -55,8 +62,22 @@ export function LivePreview({
   const [inView, setInView] = useState(false);
   const [slot, setSlot] = useState(false);
   const href = reporterProfileHref(stream.reporterUsername);
-  const fileUrl = stream.playbackKind === "file" ? stream.playbackUrl : null;
-  const mayAutoplay = autoplay && !stream.sensitiveContent && Boolean(fileUrl) && inView && slot;
+  const selected = liveViewerSelectedRenderer(stream);
+  const fileUrl = selected === "file" ? stream.playbackUrl : null;
+  const iframeUrl = selected === "iframe" ? stream.playbackUrl : null;
+  const whepUrl = selected === "whep" ? stream.playbackUrl : null;
+  const allowsAutoplay = livePreviewAllowsAutoplay(stream, autoplay);
+  const mayAutoplayFile = allowsAutoplay && Boolean(fileUrl) && inView && slot;
+  const mayLoadIframe = Boolean(iframeUrl) && (stream.sensitiveContent || (inView && slot));
+  const mayLoadWhep = Boolean(whepUrl) && (stream.sensitiveContent || (inView && slot));
+  const iframeSrc = iframeUrl
+    ? withLivePreviewIframeParams(iframeUrl, { autoplay: allowsAutoplay && inView && slot, muted: true })
+    : null;
+  const playerInteractive = livePreviewIframeIsInteractive(stream);
+  const showNavigationOverlay = livePreviewHasNavigationOverlay(stream, variant, {
+    iframeMounted: Boolean(mayLoadIframe && iframeSrc),
+    whepMounted: mayLoadWhep,
+  });
   const isGrid = variant === "grid";
   const isThumb = variant === "globeThumbnail";
   const showChrome = isGrid || isThumb ? false : chrome;
@@ -87,30 +108,54 @@ export function LivePreview({
   }, []);
 
   useEffect(() => {
-    const allowed = autoplay && !stream.sensitiveContent && Boolean(fileUrl) && inView && !reducedMotion.current;
-    if (allowed && claimPreview(stream.id)) {
+    const wantsWhepSlot = Boolean(whepUrl) && inView;
+    const wantsIframeSlot = Boolean(iframeUrl) && inView;
+    const wantsFileSlot = allowsAutoplay && Boolean(fileUrl) && inView && !reducedMotion.current;
+    if ((wantsWhepSlot || wantsIframeSlot || wantsFileSlot) && claimPreview(stream.id)) {
       setSlot(true);
       return () => {
         releasePreview(stream.id);
         setSlot(false);
       };
     }
-    releasePreview(stream.id);
+    if (process.env.NODE_ENV === "development" && wantsWhepSlot && playingIds.has(stream.id)) {
+      console.info("[Firsthand Viewer] duplicate WHEP skipped: same stream already mounted");
+    }
     setSlot(false);
     return undefined;
-  }, [autoplay, fileUrl, inView, stream.id, stream.sensitiveContent]);
+    return undefined;
+  }, [allowsAutoplay, fileUrl, iframeUrl, whepUrl, inView, stream.id, stream.sensitiveContent]);
+
+  useEffect(() => {
+    logFirsthandViewer({
+      surface: viewerSurface,
+      stream,
+      selected,
+      whepMounted: mayLoadWhep,
+    });
+  }, [mayLoadWhep, selected, stream, viewerSurface]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development" || !mayLoadIframe || !iframeSrc) {
+      return;
+    }
+    console.info("[Firsthand Playback] kind: iframe");
+    console.info(`[Firsthand Playback] customer player: ${isCloudflareCustomerLiveIframeUrl(iframeUrl) ? "yes" : "no"}`);
+    console.info("[Firsthand Playback] iframe mounted");
+    console.info(`[Firsthand Playback] stream status: ${stream.status}`);
+  }, [iframeSrc, iframeUrl, mayLoadIframe, stream.status]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) {
       return;
     }
-    if (mayAutoplay && !reducedMotion.current) {
+    if (mayAutoplayFile && !reducedMotion.current) {
       void video.play().catch(() => undefined);
       return;
     }
     video.pause();
-  }, [mayAutoplay]);
+  }, [mayAutoplayFile]);
 
   return (
     <SensitiveContentGate active={stream.sensitiveContent}>
@@ -119,7 +164,7 @@ export function LivePreview({
         className={previewClass(variant)}
         data-live-preview={variant}
       >
-        {mayAutoplay && fileUrl ? (
+        {mayAutoplayFile && fileUrl ? (
           <video
             ref={videoRef}
             src={fileUrl}
@@ -129,19 +174,36 @@ export function LivePreview({
             preload="none"
             className="pointer-events-none h-full w-full object-cover"
           />
-        ) : stream.thumbnailUrl ? (
+        ) : mayLoadWhep && whepUrl ? (
+          <LiveWhepVideo playbackUrl={whepUrl} className="h-full w-full object-cover" />
+        ) : mayLoadIframe && iframeSrc ? (
+          <iframe
+            src={iframeSrc}
+            title={stream.title}
+            allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+            className={playerInteractive ? "h-full w-full border-0" : "pointer-events-none h-full w-full border-0"}
+            tabIndex={playerInteractive ? 0 : -1}
+            data-live-iframe-interactive={playerInteractive ? "true" : "false"}
+          />
+        ) : stream.thumbnailUrl && selected !== "whep" && !iframeUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={stream.thumbnailUrl} alt="" className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center bg-black px-4">
             <span className="text-center text-sm text-surface/80">
-              {stream.status === "live" ? "Live firsthand report" : "Firsthand report"}
+              {stream.status === "live" && selected === "fallback"
+                ? process.env.NODE_ENV === "development"
+                  ? "Live playback is unavailable. WHEP was not used with the Cloudflare iframe."
+                  : "This live firsthand report cannot be played right now."
+                : stream.status === "live"
+                  ? "Live firsthand report"
+                  : "Firsthand report"}
             </span>
           </div>
         )}
         {showChrome ? (
           <>
-            <span className="absolute left-2 top-2">
+            <span className="pointer-events-none absolute left-2 top-2">
               <LiveBadge />
             </span>
             {stream.startedAt && stream.status === "live" ? (
@@ -159,11 +221,11 @@ export function LivePreview({
         ) : isThumb ? null : (
           <>
             {stream.status === "live" ? (
-              <span className="absolute left-2 top-2">
+              <span className="pointer-events-none absolute left-2 top-2">
                 <LiveBadge />
               </span>
             ) : (
-              <span className="absolute left-2 top-2">
+              <span className="pointer-events-none absolute left-2 top-2">
                 <span className="inline-flex bg-ink/80 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-surface">
                   Recent
                 </span>
@@ -174,9 +236,9 @@ export function LivePreview({
             ) : null}
           </>
         )}
-        {isThumb || !href ? null : (
+        {showNavigationOverlay && href ? (
           <Link href={href} className="absolute inset-0" aria-label={`${stream.reporterName} reporter profile`} />
-        )}
+        ) : null}
       </div>
     </SensitiveContentGate>
   );

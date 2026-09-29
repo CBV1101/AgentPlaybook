@@ -1,4 +1,5 @@
 import type { LiveStreamSummary } from "@/lib/live";
+import { isHomepageShowcaseId } from "@/lib/homepage-showcase";
 import type { CoverageRequest, EventSummary } from "@/lib/types";
 
 export type RankedLiveStream = {
@@ -10,6 +11,7 @@ export type RankedLiveStream = {
 /**
  * Homepage live ranking from product signals, not editorial importance.
  * Demand (people who asked for coverage) outweighs event activity and recency.
+ * Genuine currently-live streams always rank above development showcase streams.
  */
 export function rankLiveNow(
   streams: LiveStreamSummary[],
@@ -33,7 +35,14 @@ export function rankLiveNow(
         recency;
       return { stream, score, demandCount };
     })
-    .sort((a, b) => b.score - a.score || (b.stream.startedAt ?? "").localeCompare(a.stream.startedAt ?? ""));
+    .sort((a, b) => {
+      const aShowcase = isHomepageShowcaseId(a.stream.id);
+      const bShowcase = isHomepageShowcaseId(b.stream.id);
+      if (aShowcase !== bShowcase) {
+        return aShowcase ? 1 : -1;
+      }
+      return b.score - a.score || (b.stream.startedAt ?? "").localeCompare(a.stream.startedAt ?? "");
+    });
 }
 
 function recencyScore(startedAt: string | null, now: number) {

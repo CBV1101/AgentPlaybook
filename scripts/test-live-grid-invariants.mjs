@@ -43,7 +43,8 @@ assert(goingOnNow.includes('variant="globeThumbnail"'), "Going On Now must use t
 assert(goingOnNow.includes("z-40"), "Going On Now nav overlay must sit above the player");
 assert(goingOnNow.includes("z-20"), "Going On Now video click target must sit under nav");
 assert(goingOnNow.includes("pointer-events-none absolute inset-0 z-40"), "Going On Now nav overlay must sit above the video link");
-assert(preview.includes("isThumb || !href"), "Globe thumbnail LivePreview must not draw its own covering link");
+assert(preview.includes("showNavigationOverlay && href"), "Interactive live iframes must not sit under a covering Link");
+assert(readFileSync(join(root, "lib/live/preview-source.ts"), "utf8").includes('variant === "globeThumbnail"'), "Globe thumbnail LivePreview must not draw its own covering link");
 assert(grid.includes("fh-live-grid"), "LiveStreamGrid must own collection layout");
 assert(showcase.includes("MIN_DEV_LIVE_GRID_STREAMS = 6"), "Development must keep at least 6 live streams for the Home grid");
 assert(showcase.includes("liveCount >= MIN_DEV_LIVE_GRID_STREAMS"), "One real live stream must not replace the compact development grid");
