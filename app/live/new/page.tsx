@@ -1,8 +1,9 @@
+import { notFound, redirect } from "next/navigation";
 import { LiveForm } from "@/components/live-form";
 import { Page } from "@/components/ui/page";
+import { resumableBroadcastId } from "@/lib/data";
 import { requireCompleteReporterProfile } from "@/lib/require-profile";
 import { getEventPage, getLocationById, getRequestComposeContext, listInvestigationOptions } from "@/lib/queries";
-import { notFound } from "next/navigation";
 
 type NewLivePageProps = {
   searchParams: Promise<{
@@ -26,6 +27,12 @@ export default async function NewLivePage({ searchParams }: NewLivePageProps) {
           : nextPath,
   );
   const canLive = profile.can_live_stream !== false;
+  if (canLive) {
+    const existing = await resumableBroadcastId(profile.id);
+    if (existing) {
+      redirect(`/live/${existing}/broadcast`);
+    }
+  }
   const investigations = await listInvestigationOptions(profile.id);
 
   let requestTitle: string | undefined;

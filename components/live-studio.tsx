@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/page";
+import { LiveWhepVideo } from "@/components/live-whep-video";
 import type { LiveStreamSummary } from "@/lib/live";
 import {
   LIVE_DISCONNECT_GRACE_MS,
@@ -16,7 +17,17 @@ import {
   shouldFailBroadcastForConnectionState,
 } from "@/lib/live/whip-connection";
 import { LIVE_STREAM_PUBLISHING_RULES } from "@/lib/moderation";
-import { LIVE_STUDIO_ON_AIR_MESSAGE, liveStudioStartControl } from "@/lib/live/studio-controls";
+import {
+  LIVE_STUDIO_ON_AIR_BUTTON_CLASS,
+  LIVE_STUDIO_ON_AIR_MESSAGE,
+  liveStudioStartControl,
+} from "@/lib/live/studio-controls";
+import {
+  liveStudioAllowsNewWhipConnection,
+  liveStudioShouldRequestCamera,
+  liveStudioShowsCameraRetry,
+  liveStudioVideoSurface,
+} from "@/lib/live/studio-surface";
 
 type LiveStudioProps = {
   stream: LiveStreamSummary;
@@ -37,8 +48,20 @@ export function LiveStudio({ stream }: LiveStudioProps) {
   const disconnectedSinceRef = useRef<number | null>(null);
   const [permissionError, setPermissionError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [ownsLocalBroadcaster, setOwnsLocalBroadcaster] = useState(false);
   const [live, setLive] = useState(stream.status === "live");
   const [message, setMessage] = useState(stream.status === "live" ? LIVE_STUDIO_ON_AIR_MESSAGE : "");
+  const whepUrl = stream.playbackKind === "whep" ? stream.playbackUrl : null;
+  const videoSurface = liveStudioVideoSurface({
+    serverStatus: stream.status,
+    ownsLocalBroadcaster,
+    whepUrl,
+  });
+  const shouldRequestCamera = liveStudioShouldRequestCamera({
+    serverStatus: stream.status,
+    ownsLocalBroadcaster,
+  });
+  const showCameraRetry = liveStudioShowsCameraRetry(permissionError, shouldRequestCamera);
   const startControl = liveStudioStartControl({
     live,
     busy,
@@ -54,6 +77,15 @@ export function LiveStudio({ stream }: LiveStudioProps) {
   }, [stream.status]);
 
   useEffect(() => {
+    if (!shouldRequestCamera) {
+      return;
+    }
+    void enablePreview();
+    // New studio only: do not request camera on a resumed live tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shouldRequestCamera]);
+
+  useEffect(() => {
     return () => {
       logLiveBroadcast("Studio unmount");
       if (disconnectTimerRef.current) {
@@ -65,7 +97,7 @@ export function LiveStudio({ stream }: LiveStudioProps) {
   }, []);
 
   useEffect(() => {
-    if (!live) {
+    if (!live || !ownsLocalBroadcaster) {
       return;
     }
     const timer = window.setInterval(() => {
@@ -76,7 +108,7 @@ export function LiveStudio({ stream }: LiveStudioProps) {
       });
     }, 20000);
     return () => window.clearInterval(timer);
-  }, [live, stream.id]);
+  }, [live, ownsLocalBroadcaster, stream.id]);
 
   async function markBroadcastFailed(userMessage: string) {
     if (disconnectTimerRef.current) {
@@ -179,6 +211,9 @@ export function LiveStudio({ stream }: LiveStudioProps) {
   }
 
   async function startBroadcast() {
+    if (!liveStudioAllowsNewWhipConnection({ serverStatus: stream.status, ownsLocalBroadcaster })) {
+      return;
+    }
     if (!mediaRef.current) {
       await enablePreview();
     }
@@ -229,6 +264,7 @@ export function LiveStudio({ stream }: LiveStudioProps) {
         const payload = (await start.json()) as { error?: string };
         throw new Error(payload.error || "Could not go live.");
       }
+      setOwnsLocalBroadcaster(true);
       setLive(true);
       setMessage(LIVE_STUDIO_ON_AIR_MESSAGE);
     } catch (error) {
@@ -265,19 +301,35 @@ export function LiveStudio({ stream }: LiveStudioProps) {
 
   return (
     <div className="space-y-4">
-      <video
-        ref={previewRef}
-        autoPlay
-        muted
-        playsInline
-        className="aspect-video w-full rounded-lg border border-line bg-black"
-      />
+      <div
+        className="aspect-video w-full overflow-hidden rounded-lg border border-line bg-black"
+        data-studio-surface={videoSurface}
+      >
+        {videoSurface === "whep-playback" && whepUrl ? (
+          <LiveWhepVideo playbackUrl={whepUrl} className="h-full w-full" />
+        ) : videoSurface === "whep-playback" ? (
+          <div className="flex h-full items-center justify-center px-4">
+            <p className="text-center text-sm text-surface/80">This live broadcast is on air. Playback is unavailable in this tab.</p>
+          </div>
+        ) : (
+          <video
+            ref={previewRef}
+            autoPlay
+            muted
+            playsInline
+            className="h-full w-full"
+            data-studio-local-preview="true"
+          />
+        )}
+      </div>
       {permissionError ? <ErrorState>{permissionError}</ErrorState> : null}
       {startControl.statusMessage ? <p className="fh-meta">{startControl.statusMessage}</p> : null}
       <div className="flex flex-wrap gap-3">
-        <Button type="button" variant="secondary" onClick={() => void enablePreview()}>
-          Enable camera
-        </Button>
+        {showCameraRetry ? (
+          <Button type="button" variant="secondary" onClick={() => void enablePreview()}>
+            Retry camera
+          </Button>
+        ) : null}
         {startControl.appearance === "on-air" ? (
           <button
             type="button"
@@ -285,7 +337,7 @@ export function LiveStudio({ stream }: LiveStudioProps) {
             aria-disabled="true"
             aria-label="Stream is live"
             data-studio-start="on-air"
-            className="inline-flex h-10 min-h-10 min-w-[10.5rem] cursor-not-allowed items-center justify-center rounded-md border border-line bg-canvas px-4 text-sm font-medium text-muted"
+            className={LIVE_STUDIO_ON_AIR_BUTTON_CLASS}
           >
             Stream is live
           </button>

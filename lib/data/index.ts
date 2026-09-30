@@ -62,6 +62,7 @@ import {
   mockListPublicLiveStreams,
   mockLiveBroadcastSession,
   mockMarkLiveStream,
+  mockResumableBroadcastId,
   mockSetReporterLivePrivilege,
   mockSetSensitiveContent,
 } from "@/lib/data/mock/repository";
@@ -156,6 +157,7 @@ import {
   supabaseListPublicLiveStreams,
   supabaseLiveBroadcastSession,
   supabaseMarkLiveStream,
+  supabaseResumableBroadcastId,
   supabaseSetReporterLivePrivilege,
   supabaseSetSensitiveContent,
 } from "@/lib/data/supabase/live-repository";
@@ -574,6 +576,10 @@ export async function createLiveStreamRecord(input: {
     await supabaseAppendLiveToInvestigation(input.userId, created.id, input.investigationId);
   }
   return created;
+}
+
+export async function resumableBroadcastId(reporterId: string): Promise<string | null> {
+  return isMockMode() ? mockResumableBroadcastId(reporterId) : supabaseResumableBroadcastId(reporterId);
 }
 
 export async function liveBroadcastSession(userId: string, streamId: string) {

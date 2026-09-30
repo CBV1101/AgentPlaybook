@@ -1436,6 +1436,7 @@ export {
   mockLiveBroadcastSession,
   mockLiveLocationIds,
   mockMarkLiveStream,
+  mockResumableBroadcastId,
   mockSetReporterLivePrivilege,
   mockSetSensitiveContent,
   mockTerminateLiveStream,

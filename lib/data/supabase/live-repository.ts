@@ -8,6 +8,12 @@ import {
   type LiveStreamSummary,
 } from "@/lib/live";
 import {
+  claimReporterBroadcast,
+  isPostgresUniqueViolation,
+  occupancyDecision,
+  type OccupyingBroadcast,
+} from "@/lib/live/broadcast-occupancy";
+import {
   createCloudflareLiveInput,
   disableCloudflareLiveInput,
   getCloudflareLiveInput,
@@ -348,6 +354,72 @@ export async function supabaseGetLiveStreamPage(id: string, currentUserId?: stri
   return summary ?? null;
 }
 
+function occupyingFromRow(row: {
+  id: string;
+  reporter_id: string;
+  status: string;
+  created_at: string;
+  cloudflare_live_input_id: string | null;
+}): OccupyingBroadcast {
+  return {
+    id: row.id,
+    reporterId: row.reporter_id,
+    status: row.status,
+    createdAt: row.created_at,
+    cloudflareLiveInputId: row.cloudflare_live_input_id,
+  };
+}
+
+export async function supabaseFindOccupyingBroadcast(reporterId: string): Promise<OccupyingBroadcast | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("live_streams")
+    .select("id, reporter_id, status, created_at, cloudflare_live_input_id")
+    .eq("reporter_id", reporterId)
+    .in("status", ["created", "live"])
+    .maybeSingle();
+  return data ? occupyingFromRow(data) : null;
+}
+
+async function supabaseObserveOccupyingIngest(row: OccupyingBroadcast): Promise<CloudflareIngestObservation> {
+  if (!isRealCloudflareLiveInputId(row.cloudflareLiveInputId) || !isCloudflareLiveConfigured()) {
+    return "disconnected";
+  }
+  try {
+    const input = await getCloudflareLiveInput(row.cloudflareLiveInputId);
+    return input.ingest;
+  } catch {
+    return "unknown";
+  }
+}
+
+async function supabaseReconcileAbandonedBroadcast(row: OccupyingBroadcast) {
+  const supabase = await createClient();
+  if (isRealCloudflareLiveInputId(row.cloudflareLiveInputId) && isCloudflareLiveConfigured()) {
+    try {
+      await disableCloudflareLiveInput(row.cloudflareLiveInputId);
+    } catch {
+      // Slot must still be freed even if disable fails.
+    }
+  }
+  await supabase
+    .from("live_streams")
+    .update({ status: "failed", ended_at: new Date().toISOString() })
+    .eq("id", row.id)
+    .in("status", ["created", "live"]);
+}
+
+export async function supabaseResumableBroadcastId(reporterId: string): Promise<string | null> {
+  await supabaseSweepLiveStreams();
+  const occupying = await supabaseFindOccupyingBroadcast(reporterId);
+  if (!occupying) {
+    return null;
+  }
+  const ingest = occupying.status === "live" ? await supabaseObserveOccupyingIngest(occupying) : "unknown";
+  const decision = occupancyDecision({ occupying, ingest });
+  return decision.action === "resume" ? decision.id : null;
+}
+
 export async function supabaseCreateLiveStream(input: {
   userId: string;
   title: string;
@@ -355,9 +427,7 @@ export async function supabaseCreateLiveStream(input: {
   eventId?: string | null;
   requestId?: string | null;
 }) {
-  // P0 #4B (not this ticket): serialize create so a reporter has at most one
-  // occupying row (created|live). Connected existing → return that broadcast.
-  // DB-live + Cloudflare disconnected → reconcile, then allow create.
+  await supabaseSweepLiveStreams();
   const supabase = await createClient();
   const { data: reporter } = await supabase
     .from("profiles")
@@ -385,7 +455,6 @@ export async function supabaseCreateLiveStream(input: {
     }
   }
 
-  const id = randomUUID();
   try {
     assertSupabaseLiveCreateAllowed(isCloudflareLiveConfigured());
   } catch (error) {
@@ -393,43 +462,63 @@ export async function supabaseCreateLiveStream(input: {
     throw error;
   }
 
-  const { error } = await supabase.from("live_streams").insert({
-    id,
-    reporter_id: input.userId,
-    location_id: input.locationId,
-    event_id: input.eventId || null,
-    coverage_request_id: input.requestId || null,
-    status: "created",
-    title: input.title,
-  });
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  try {
-    const created = await createCloudflareLiveInput({
-      name: input.title,
-      streamId: id,
-      reporterId: input.userId,
-    });
-    const { error: updateError } = await supabase
-      .from("live_streams")
-      .update({ cloudflare_live_input_id: created.uid })
-      .eq("id", id);
-    if (updateError) {
-      throw new Error(updateError.message);
-    }
-  } catch (error) {
-    await supabase.from("live_streams").update({ status: "failed", ended_at: new Date().toISOString() }).eq("id", id);
-    console.error("[firsthand] live create failed", {
-      operation: "cloudflare-live-input",
-      streamId: id,
-      error: error instanceof Error ? error.message : "unknown",
-    });
-    throw new Error(LIVE_UNAVAILABLE_CODE);
-  }
-
-  return { id };
+  return claimReporterBroadcast(input, {
+    findOccupying: supabaseFindOccupyingBroadcast,
+    observeIngest: supabaseObserveOccupyingIngest,
+    reconcileAbandoned: supabaseReconcileAbandonedBroadcast,
+    insertCreated: async (payload) => {
+      const id = randomUUID();
+      const { error } = await supabase.from("live_streams").insert({
+        id,
+        reporter_id: payload.userId,
+        location_id: payload.locationId,
+        event_id: payload.eventId || null,
+        coverage_request_id: payload.requestId || null,
+        status: "created",
+        title: payload.title,
+      });
+      if (error && isPostgresUniqueViolation(error)) {
+        return { ok: false, uniqueConflict: true };
+      }
+      if (error) {
+        throw new Error(error.message);
+      }
+      return { ok: true, id };
+    },
+    attachCloudflare: async (streamId, payload) => {
+      let createdUid: string | null = null;
+      try {
+        const created = await createCloudflareLiveInput({
+          name: payload.title,
+          streamId,
+          reporterId: payload.userId,
+        });
+        createdUid = created.uid;
+        const { error: updateError } = await supabase
+          .from("live_streams")
+          .update({ cloudflare_live_input_id: created.uid })
+          .eq("id", streamId);
+        if (updateError) {
+          throw new Error(updateError.message);
+        }
+      } catch (error) {
+        if (createdUid) {
+          try {
+            await disableCloudflareLiveInput(createdUid);
+          } catch {
+            // The DB row is failed below so this input is not the occupying broadcast.
+          }
+        }
+        await supabase.from("live_streams").update({ status: "failed", ended_at: new Date().toISOString() }).eq("id", streamId);
+        console.error("[firsthand] live create failed", {
+          operation: "cloudflare-live-input",
+          streamId,
+          error: error instanceof Error ? error.message : "unknown",
+        });
+        throw new Error(LIVE_UNAVAILABLE_CODE);
+      }
+    },
+  }).then((claimed) => ({ id: claimed.id }));
 }
 
 export async function supabaseLiveBroadcastSession(userId: string, streamId: string) {

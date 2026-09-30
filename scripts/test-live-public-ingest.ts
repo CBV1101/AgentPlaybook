@@ -181,9 +181,10 @@ assert(
   "owner/studio GET must not drop a DB-live row just because ingest is disconnected",
 );
 const createFn = supabaseRepo.slice(supabaseRepo.indexOf("export async function supabaseCreateLiveStream"));
+assert(createFn.includes("claimReporterBroadcast"), "P0 #4B create must claim the reporter occupancy slot");
 assert(
-  !createFn.includes("isOccupyingBroadcastSlot"),
-  "P0 #4B occupancy must not be enforced during #4A create",
+  supabaseRepo.includes("item.status !== \"live\" || isPubliclyLive(item)"),
+  "#4A public visibility filter remains on the catalog GET",
 );
 
 const mockRepo = readFileSync(join(process.cwd(), "lib/data/mock/live-repository.ts"), "utf8");

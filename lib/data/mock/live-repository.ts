@@ -5,10 +5,16 @@ import { assertEventAttachable } from "@/lib/events";
 import {
   LIVE_CREATED_TIMEOUT_MS,
   MOCK_LIVE_SAMPLE_VIDEO,
+  isOccupyingBroadcastSlot,
   isPublicLiveStatus,
   isPubliclyLive,
   type LiveStreamSummary,
 } from "@/lib/live";
+import {
+  claimReporterBroadcast,
+  occupancyDecision,
+  type OccupyingBroadcast,
+} from "@/lib/live/broadcast-occupancy";
 import { liveRecordingProvenanceFields } from "@/lib/media/provenance";
 import type { LiveStreamRecord } from "@/lib/database.types";
 
@@ -130,6 +136,34 @@ export async function mockGetLiveStreamPage(id: string, currentUserId?: string |
   return liveRowSummary(row, admin);
 }
 
+function occupyingFromMockRow(row: LiveStreamRecord): OccupyingBroadcast {
+  return {
+    id: row.id,
+    reporterId: row.reporter_id,
+    status: row.status,
+    createdAt: row.created_at,
+    cloudflareLiveInputId: row.cloudflare_live_input_id,
+  };
+}
+
+export function mockFindOccupyingBroadcast(reporterId: string): OccupyingBroadcast | null {
+  mockSweepLiveStreams();
+  const row = (readMockDatabase().live_streams ?? []).find(
+    (item) => item.reporter_id === reporterId && isOccupyingBroadcastSlot(item.status),
+  );
+  return row ? occupyingFromMockRow(row) : null;
+}
+
+export function mockResumableBroadcastId(reporterId: string): string | null {
+  const occupying = mockFindOccupyingBroadcast(reporterId);
+  if (!occupying) {
+    return null;
+  }
+  const ingest = occupying.status === "live" ? "connected" : "unknown";
+  const decision = occupancyDecision({ occupying, ingest });
+  return decision.action === "resume" ? decision.id : null;
+}
+
 export async function mockCreateLiveStream(input: {
   userId: string;
   title: string;
@@ -137,7 +171,7 @@ export async function mockCreateLiveStream(input: {
   eventId?: string | null;
   requestId?: string | null;
 }) {
-  // P0 #4B occupancy (created|live) is not enforced here. See supabaseCreateLiveStream.
+  mockSweepLiveStreams();
   const locationId = input.locationId;
   const database = readMockDatabase();
   const reporter = database.profiles.find((item) => item.id === input.userId);
@@ -158,29 +192,59 @@ export async function mockCreateLiveStream(input: {
     }
   }
 
-  const id = randomUUID();
-  const now = new Date().toISOString();
-  updateMockDatabase((current) => {
-    current.live_streams ??= [];
-    current.live_streams.push({
-      id,
-      reporter_id: input.userId,
-      location_id: locationId,
-      event_id: input.eventId || null,
-      coverage_request_id: input.requestId || null,
-      report_id: null,
-      cloudflare_live_input_id: `mock-live-${id}`,
-      recording_asset_id: null,
-      status: "created",
-      title: input.title,
-      started_at: null,
-      ended_at: null,
-      last_seen_at: null,
-      created_at: now,
-      sensitive_content: false,
-    });
+  const claimed = await claimReporterBroadcast(input, {
+    findOccupying: async (reporterId) => mockFindOccupyingBroadcast(reporterId),
+    observeIngest: async () => "connected",
+    reconcileAbandoned: async (row) => {
+      updateMockDatabase((current) => {
+        const target = current.live_streams.find((item) => item.id === row.id);
+        if (target && isOccupyingBroadcastSlot(target.status)) {
+          target.status = "failed";
+          target.ended_at = new Date().toISOString();
+        }
+      });
+    },
+    insertCreated: async (payload) => {
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      let conflict = false;
+      updateMockDatabase((current) => {
+        current.live_streams ??= [];
+        const occupying = current.live_streams.find(
+          (item) => item.reporter_id === payload.userId && isOccupyingBroadcastSlot(item.status),
+        );
+        if (occupying) {
+          conflict = true;
+          return;
+        }
+        current.live_streams.push({
+          id,
+          reporter_id: payload.userId,
+          location_id: payload.locationId,
+          event_id: payload.eventId || null,
+          coverage_request_id: payload.requestId || null,
+          report_id: null,
+          cloudflare_live_input_id: `mock-live-${id}`,
+          recording_asset_id: null,
+          status: "created",
+          title: payload.title,
+          started_at: null,
+          ended_at: null,
+          last_seen_at: null,
+          created_at: now,
+          sensitive_content: false,
+        });
+      });
+      if (conflict) {
+        return { ok: false, uniqueConflict: true };
+      }
+      return { ok: true, id };
+    },
+    attachCloudflare: async () => {
+      // Mock catalog identity is written with the occupying row.
+    },
   });
-  return { id };
+  return { id: claimed.id };
 }
 
 export async function mockLiveBroadcastSession(userId: string, streamId: string) {

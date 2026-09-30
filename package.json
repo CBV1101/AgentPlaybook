@@ -17,6 +17,7 @@
     "test:live-fail-closed": "npx tsx scripts/test-live-fail-closed.ts",
     "test:live-preview-priority": "npx tsx scripts/test-live-preview-priority.ts",
     "test:live-public-ingest": "npx tsx scripts/test-live-public-ingest.ts",
+    "test:live-broadcast-occupancy": "npx tsx scripts/test-live-broadcast-occupancy.ts",
     "test:live-studio-controls": "npx tsx scripts/test-live-studio-controls.ts",
     "test:media-upload": "npx tsx scripts/test-media-upload.ts",
     "test:media-authorization": "npx tsx scripts/test-media-authorization.ts",

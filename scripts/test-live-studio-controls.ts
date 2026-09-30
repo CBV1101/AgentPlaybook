@@ -6,6 +6,12 @@ import {
   liveStudioStartControl,
   liveStudioStartLabelConflictsWithOnAir,
 } from "../lib/live/studio-controls";
+import {
+  liveStudioAllowsNewWhipConnection,
+  liveStudioShouldRequestCamera,
+  liveStudioShowsCameraRetry,
+  liveStudioVideoSurface,
+} from "../lib/live/studio-surface";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -77,9 +83,72 @@ function run() {
   assert(conflict, "helper detects You are live + Start broadcast as invalid");
 
   const studioSrc = readFileSync(join(process.cwd(), "components/live-studio.tsx"), "utf8");
+  const studioControlsSrc = readFileSync(join(process.cwd(), "lib/live/studio-controls.ts"), "utf8");
   assert(studioSrc.includes('data-studio-start="on-air"'), "studio mounts a dedicated on-air control");
-  assert(studioSrc.includes("bg-canvas"), "on-air control uses gray canvas, not live red");
-  assert(studioSrc.includes("cursor-not-allowed"), "on-air control uses a disabled cursor");
+  assert(studioSrc.includes("LIVE_STUDIO_ON_AIR_BUTTON_CLASS"), "studio uses the dedicated on-air button class");
+  assert(studioControlsSrc.includes("bg-canvas"), "on-air control uses gray canvas, not live red");
+  assert(studioControlsSrc.includes("cursor-not-allowed"), "on-air control uses a disabled cursor");
+
+  assert(!studioSrc.includes("Enable camera"), "successful studio must not permanently show Enable camera");
+  assert(studioSrc.includes("Retry camera"), "camera failure may show Retry camera");
+  assert(studioSrc.includes("LiveWhepVideo"), "resumed live studio reuses the public WHEP viewer");
+  assert(studioSrc.includes("liveStudioShouldRequestCamera"), "studio gates getUserMedia off resumed live tabs");
+  assert(studioSrc.includes("liveStudioAllowsNewWhipConnection"), "studio must not start a second WHIP on resume");
+  assert(studioSrc.includes("/api/live/end"), "end broadcast still posts to the server end path");
+  assert(!studioSrc.includes("createCloudflareLiveInput"), "studio must not create a Cloudflare Live Input");
+
+  const newStudio = liveStudioVideoSurface({ serverStatus: "created", ownsLocalBroadcaster: false });
+  assert(newStudio === "local-preview", "new studio uses local camera preview");
+  assert(
+    liveStudioShouldRequestCamera({ serverStatus: "created", ownsLocalBroadcaster: false }),
+    "new studio still requests camera automatically",
+  );
+  assert(
+    liveStudioAllowsNewWhipConnection({ serverStatus: "created", ownsLocalBroadcaster: false }),
+    "new studio may establish WHIP",
+  );
+  assert(
+    !liveStudioShowsCameraRetry("", true),
+    "successful camera init does not show a camera button",
+  );
+  assert(
+    liveStudioShowsCameraRetry("Camera permission was denied.", true),
+    "camera failure may show Retry camera",
+  );
+
+  const originalLive = liveStudioVideoSurface({
+    serverStatus: "live",
+    ownsLocalBroadcaster: true,
+    whepUrl: "https://example.cloudflarestream.com/uid/webRTC/play",
+  });
+  assert(originalLive === "local-preview", "owning tab keeps local camera preview");
+  assert(
+    !liveStudioShouldRequestCamera({ serverStatus: "live", ownsLocalBroadcaster: true }),
+    "owning tab does not re-request camera for playback",
+  );
+  assert(
+    !liveStudioAllowsNewWhipConnection({ serverStatus: "live", ownsLocalBroadcaster: true }),
+    "owning live tab does not create a second WHIP",
+  );
+
+  const resumedLive = liveStudioVideoSurface({
+    serverStatus: "live",
+    ownsLocalBroadcaster: false,
+    whepUrl: "https://example.cloudflarestream.com/uid/webRTC/play",
+  });
+  assert(resumedLive === "whep-playback", "resumed live tab uses WHEP, not a blank local video");
+  assert(
+    !liveStudioShouldRequestCamera({ serverStatus: "live", ownsLocalBroadcaster: false }),
+    "resumed live tab must not request camera merely for playback",
+  );
+  assert(
+    !liveStudioAllowsNewWhipConnection({ serverStatus: "live", ownsLocalBroadcaster: false }),
+    "resumed live tab must not create another WHIP connection",
+  );
+
+  const resumedOnAir = liveStudioStartControl({ live: true, busy: false, streamStatus: "live" });
+  assert(resumedOnAir.label === "Stream is live", "resumed live shows Stream is live");
+  assert(resumedOnAir.disabled, "resumed Stream is live is not clickable");
 
   console.log("live studio control tests passed");
 }
