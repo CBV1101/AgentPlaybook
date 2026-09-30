@@ -3,6 +3,7 @@ import { one, toLocationSummary, REPORT_FEED_SELECT, type ReportJoinRow } from "
 import { deliverReports, deliverStoredPhotoFields } from "@/lib/data/report-delivery";
 import { canViewReportMedia } from "@/lib/media/visibility";
 import { supabaseListPublicLiveStreams } from "@/lib/data/supabase/live-repository";
+import { isPubliclyLive } from "@/lib/live";
 import type { InvestigationItemRecord, InvestigationRecord, InvestigationStatus, Location } from "@/lib/database.types";
 import type { Database } from "@/lib/database.types";
 import {
@@ -76,7 +77,7 @@ async function summaryFor(row: InvestigationRecord): Promise<InvestigationSummar
   const itemRows = (items ?? []) as InvestigationItemRecord[];
   const liveNow = itemRows.some((item) => {
     const stream = streams.find((live) => live.id === item.live_stream_id || live.reportId === item.report_id);
-    return stream?.status === "live";
+    return stream ? isPubliclyLive(stream) : false;
   });
   const reportIds = itemRows.map((item) => item.report_id).filter((id): id is string => Boolean(id));
   let publicCount = itemRows.filter((item) => {

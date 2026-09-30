@@ -7,7 +7,7 @@ import {
   type CoverageOpportunity,
   type GlobeActivityMarker,
 } from "@/lib/coverage-opportunity";
-import { isActiveLiveStatus, liveHref, reporterProfileHref } from "@/lib/live";
+import { isPubliclyLive, liveHref, reporterProfileHref } from "@/lib/live";
 import { haversineKm } from "@/lib/live-for-location";
 
 export async function getWantedPresentation(userId?: string | null) {
@@ -29,7 +29,7 @@ export async function getWantedPresentation(userId?: string | null) {
       reporterCount: reporters.length,
       activeStreamCount: showcased.liveStreams.filter(
         (item) =>
-          isActiveLiveStatus(item.status) &&
+          isPubliclyLive(item) &&
           item.location.city === request.city &&
           item.location.country === request.country,
       ).length,
@@ -91,7 +91,7 @@ export async function getExplorePresentation(userId?: string | null) {
 
   return {
     usingShowcase: showcased.usingShowcase,
-    liveStreams: showcased.liveStreams.filter((item) => isActiveLiveStatus(item.status)),
+    liveStreams: showcased.liveStreams.filter((item) => isPubliclyLive(item)),
     endedOrRecorded: showcased.reports,
     requests: showcased.requests,
     reports: showcased.reports,
@@ -112,7 +112,7 @@ function buildGlobeMarkers(input: {
   const markers: GlobeActivityMarker[] = [];
   const liveUsed = new Set<string>();
   const liveStreams = input.liveStreams.filter(
-    (stream) => isActiveLiveStatus(stream.status) && stream.location.latitude != null && stream.location.longitude != null,
+    (stream) => isPubliclyLive(stream) && stream.location.latitude != null && stream.location.longitude != null,
   );
   for (const stream of liveStreams) {
     if (liveUsed.has(stream.id)) {

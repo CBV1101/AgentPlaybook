@@ -1,5 +1,5 @@
 import type { InvestigationItemRecord, InvestigationRecord, InvestigationStatus } from "@/lib/database.types";
-import type { LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 import type { FirsthandReport, LocationSummary } from "@/lib/types";
 
 export type InvestigationSummary = {
@@ -139,7 +139,7 @@ export function partFromReport(
   report: FirsthandReport,
   liveStream: LiveStreamSummary | null,
 ): InvestigationPart {
-  const liveNow = liveStream?.status === "live";
+  const liveNow = liveStream ? isPubliclyLive(liveStream) : false;
   return {
     id: item.id,
     position: item.position,
@@ -161,7 +161,7 @@ export function partFromReport(
 }
 
 export function partFromLiveOnly(item: InvestigationItemRecord, stream: LiveStreamSummary): InvestigationPart {
-  const liveNow = stream.status === "live";
+  const liveNow = isPubliclyLive(stream);
   return {
     id: item.id,
     position: item.position,

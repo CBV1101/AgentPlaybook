@@ -12,6 +12,7 @@ import { EmptyState, Page, Section } from "@/components/ui/page";
 import { getCurrentUser } from "@/lib/auth";
 import { isFollowingLocation } from "@/lib/data";
 import { getCountryPage } from "@/lib/queries";
+import { isPubliclyLive } from "@/lib/live";
 
 type CountryPageProps = {
   params: Promise<{ countrySlug: string }>;
@@ -51,7 +52,7 @@ export default async function CountryPage({ params }: CountryPageProps) {
       reportCount: city.reportCount,
       openRequestCount: city.openRequestCount,
       liveCount: page.liveStreams.filter(
-        (stream) => stream.status === "live" && stream.location.city === city.name,
+        (stream) => isPubliclyLive(stream) && stream.location.city === city.name,
       ).length,
     }));
 

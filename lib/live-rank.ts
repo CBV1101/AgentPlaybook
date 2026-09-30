@@ -1,4 +1,4 @@
-import type { LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 import { isHomepageShowcaseId } from "@/lib/homepage-showcase";
 import type { CoverageRequest, EventSummary } from "@/lib/types";
 
@@ -23,7 +23,7 @@ export function rankLiveNow(
   const eventById = new Map(events.map((item) => [item.id, item]));
 
   return streams
-    .filter((stream) => stream.status === "live")
+    .filter((stream) => isPubliclyLive(stream))
     .map((stream) => {
       const demandCount = stream.requestId ? (demandByRequest.get(stream.requestId) ?? 0) : 0;
       const event = stream.eventId ? eventById.get(stream.eventId) : undefined;

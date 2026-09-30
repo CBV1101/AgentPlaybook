@@ -1,4 +1,5 @@
 import { cloudflareCustomerWhepPlaybackUrl } from "@/lib/live/customer-player";
+import type { CloudflareIngestObservation } from "@/lib/live";
 import { cloudflareStreamEmbedUrl, cloudflareStreamThumbnailUrl } from "@/lib/media/classify";
 
 type CloudflareLiveResult = {
@@ -40,6 +41,13 @@ export function isCloudflareLiveInputConnected(status: unknown) {
   const current = row.current && typeof row.current === "object" ? (row.current as Record<string, unknown>) : null;
   const values = [row.state, current?.state, row.status];
   return values.some((value) => String(value ?? "").trim().toLowerCase() === "connected");
+}
+
+export function cloudflareIngestFromLiveInputStatus(status: unknown): CloudflareIngestObservation {
+  if (status == null) {
+    return "unknown";
+  }
+  return isCloudflareLiveInputConnected(status) ? "connected" : "disconnected";
 }
 
 export function isCloudflareLiveConfigured(env: Record<string, string | undefined> = process.env as Record<string, string | undefined>) {
@@ -212,6 +220,7 @@ export async function getCloudflareLiveInput(uid: string) {
   return {
     uid: payload.result.uid,
     connected: isCloudflareLiveInputConnected(status),
+    ingest: cloudflareIngestFromLiveInputStatus(status),
     enabled: payload.result.enabled !== false,
     statusSummary: summarizeCloudflareLiveInputStatus(status),
     webRTCPlaybackPresent: Boolean(payload.result.webRTCPlayback),
@@ -222,8 +231,10 @@ export async function getCloudflareLiveInput(uid: string) {
   };
 }
 
-export async function resolveCloudflareLiveWhepUrl(liveInputId: string): Promise<string | null> {
-  const input = await getCloudflareLiveInput(liveInputId);
+export function whepPlaybackUrlFromLiveInput(
+  liveInputId: string,
+  input: { whepUrl: string | null; playbackHls: string | null; playbackDash: string | null },
+) {
   const candidates = [input.whepUrl, input.playbackHls, input.playbackDash];
   for (const candidate of candidates) {
     const value = candidate?.trim() ?? "";
@@ -239,6 +250,11 @@ export async function resolveCloudflareLiveWhepUrl(liveInputId: string): Promise
     }
   }
   return null;
+}
+
+export async function resolveCloudflareLiveWhepUrl(liveInputId: string): Promise<string | null> {
+  const input = await getCloudflareLiveInput(liveInputId);
+  return whepPlaybackUrlFromLiveInput(liveInputId, input);
 }
 
 export async function disableCloudflareLiveInput(uid: string) {

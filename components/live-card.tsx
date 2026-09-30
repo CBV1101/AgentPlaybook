@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { LivePreview } from "@/components/live-preview";
 import { Badge, LiveBadge } from "@/components/ui/badge";
-import { liveHref, liveStatusLabel, reporterProfileHref, type LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, liveHref, liveStatusLabel, reporterProfileHref, type LiveStreamSummary } from "@/lib/live";
 import { liveCardUsesLivePreview } from "@/lib/live/preview-source";
 import { formatWhen } from "@/lib/format";
 import { cn } from "@/lib/cn";
@@ -15,7 +15,7 @@ export function LiveCard({
   featured?: boolean;
   viewerSurface?: "location" | "profile";
 }) {
-  const live = stream.status === "live";
+  const live = isPubliclyLive(stream);
   const href = reporterProfileHref(stream.reporterUsername) ?? liveHref(stream.id);
   const preview = stream.thumbnailUrl;
   const useLivePreview = liveCardUsesLivePreview(stream);

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { LivePreview } from "@/components/live-preview";
 import { ReporterAvatar } from "@/components/reporter-avatar";
 import { Badge } from "@/components/ui/badge";
-import { reporterProfileHref, type LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, reporterProfileHref, type LiveStreamSummary } from "@/lib/live";
 import type { FirsthandReport } from "@/lib/types";
 
 export function CompactLiveStreamCard({
@@ -13,7 +13,7 @@ export function CompactLiveStreamCard({
   tone?: "stage" | "surface";
 }) {
   const reporterHref = reporterProfileHref(stream.reporterUsername);
-  const live = stream.status === "live";
+  const live = isPubliclyLive(stream);
   return (
     <article className="fh-live-tile">
       <LivePreview stream={stream} autoplay={live} variant="grid" viewerSurface="home" />

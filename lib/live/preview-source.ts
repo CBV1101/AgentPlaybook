@@ -1,11 +1,11 @@
-import type { LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 import { isCloudflareCustomerLiveIframeUrl } from "@/lib/live/customer-player";
 
 export type LivePreviewSurface = "whep" | "iframe" | "file" | "thumbnail" | "placeholder";
 export type LivePreviewOverlayVariant = "grid" | "globeThumbnail" | "full";
 
 export function livePreviewSurface(stream: LiveStreamSummary): LivePreviewSurface {
-  if (stream.status === "live" && stream.playbackKind === "whep") {
+  if (isPubliclyLive(stream) && stream.playbackKind === "whep") {
     return stream.playbackUrl ? "whep" : "placeholder";
   }
   if (stream.playbackKind === "iframe" && stream.playbackUrl) {
@@ -26,7 +26,7 @@ export function livePreviewAllowsAutoplay(stream: LiveStreamSummary, autoplayReq
 
 export function livePreviewIframeIsInteractive(stream: LiveStreamSummary) {
   return (
-    stream.status === "live" &&
+    isPubliclyLive(stream) &&
     livePreviewSurface(stream) === "iframe" &&
     isCloudflareCustomerLiveIframeUrl(stream.playbackUrl)
   );
@@ -53,5 +53,5 @@ export function livePreviewHasNavigationOverlay(
 }
 
 export function liveCardUsesLivePreview(stream: LiveStreamSummary) {
-  return stream.status === "live";
+  return isPubliclyLive(stream);
 }

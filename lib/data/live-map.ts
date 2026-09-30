@@ -18,6 +18,7 @@ export function toLiveStreamSummary(input: {
   includeModerationPlayback?: boolean;
   livePlayerUrl?: string | null;
   liveWhepUrl?: string | null;
+  cloudflareIngest?: LiveStreamSummary["cloudflareIngest"];
 }): LiveStreamSummary {
   const { row } = input;
   const recordingId = row.recording_asset_id;
@@ -72,5 +73,6 @@ export function toLiveStreamSummary(input: {
     sensitiveContent: sensitive,
     recordingAssetId: input.includeModerationPlayback ? recordingId : null,
     viewerCount: row.viewer_count ?? null,
+    cloudflareIngest: input.cloudflareIngest ?? "unknown",
   };
 }

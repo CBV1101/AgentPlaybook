@@ -126,6 +126,7 @@ function liveNow(): LiveStreamSummary {
     sensitiveContent: false,
     recordingAssetId: null,
     viewerCount: null,
+    cloudflareIngest: "unknown",
   };
 }
 

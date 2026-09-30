@@ -1,5 +1,5 @@
 import type { CoverageRequest, FirsthandReport, LocationSummary } from "@/lib/types";
-import type { LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 
 /**
  * A coverage opportunity is a recommendation to look at a place.
@@ -120,7 +120,7 @@ export function reportersInArea(
   lives: LiveStreamSummary[],
 ): AreaReporter[] {
   const liveHere = lives.filter(
-    (item) => item.status === "live" && item.location.city === city && item.location.country === country,
+    (item) => isPubliclyLive(item) && item.location.city === city && item.location.country === country,
   );
   const byId = new Map<string, AreaReporter>();
   for (const stream of liveHere) {

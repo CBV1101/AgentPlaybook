@@ -3,6 +3,8 @@ import { toLiveStreamSummary } from "@/lib/data/live-map";
 import { assertEventAttachable } from "@/lib/events";
 import {
   LIVE_CREATED_TIMEOUT_MS,
+  isPubliclyLive,
+  type CloudflareIngestObservation,
   type LiveStreamSummary,
 } from "@/lib/live";
 import {
@@ -12,7 +14,7 @@ import {
   getCloudflareLiveViewerCount,
   isCloudflareLiveConfigured,
   listCloudflareLiveRecordings,
-  resolveCloudflareLiveWhepUrl,
+  whepPlaybackUrlFromLiveInput,
 } from "@/lib/media/cloudflare-live";
 import { cloudflareStreamEmbedUrl, cloudflareStreamThumbnailUrl } from "@/lib/media/classify";
 import { liveRecordingProvenanceFields } from "@/lib/media/provenance";
@@ -96,7 +98,9 @@ async function hydrateLiveRows(
   const profileById = new Map((profiles ?? []).map((item) => [item.id, item]));
   const eventById = new Map((events ?? []).map((item) => [item.id, item.title]));
   const requestById = new Map((requests ?? []).map((item) => [item.id, item.title]));
-  const liveWhepByInputId = await resolveLiveWhepUrls(rows);
+  const observations = await observeCloudflareLiveInputs(rows);
+  const liveWhepByInputId = observations.whepByInputId;
+  const ingestByInputId = observations.ingestByInputId;
 
   const summaries = rows.flatMap((row) => {
     const location = locationById.get(row.location_id);
@@ -131,12 +135,14 @@ async function hydrateLiveRows(
       requestTitle: row.coverage_request_id ? requestById.get(row.coverage_request_id) ?? null : null,
       includeModerationPlayback,
       liveWhepUrl: liveInputId ? liveWhepByInputId.get(liveInputId) ?? null : null,
+      cloudflareIngest: liveInputId ? ingestByInputId.get(liveInputId) ?? "unknown" : "unknown",
     });
     if (traced) {
       logLivePublicTrace("summary: yes");
       logLivePublicTrace("summary source: real");
       logLivePublicTrace(`summary status: ${summary.status}`);
       logLivePublicTrace(`summary playback kind: ${summary.playbackKind}`);
+      logLivePublicTrace(`summary ingest: ${summary.cloudflareIngest}`);
       logLivePublicTrace(
         `summary WHEP: ${summary.playbackKind === "whep" && summary.playbackUrl ? "yes" : "no"}`,
       );
@@ -158,13 +164,14 @@ async function hydrateLiveRows(
   return summaries;
 }
 
-async function resolveLiveWhepUrls(rows: LiveStreamRecord[]) {
-  const urls = new Map<string, string>();
+async function observeCloudflareLiveInputs(rows: LiveStreamRecord[]) {
+  const whepByInputId = new Map<string, string>();
+  const ingestByInputId = new Map<string, CloudflareIngestObservation>();
   if (!isCloudflareLiveConfigured()) {
     if (process.env.NODE_ENV === "development") {
       console.info("[Firsthand Live] Cloudflare configured: no");
     }
-    return urls;
+    return { whepByInputId, ingestByInputId };
   }
   if (process.env.NODE_ENV === "development") {
     console.info("[Firsthand Live] Cloudflare configured: yes");
@@ -172,9 +179,9 @@ async function resolveLiveWhepUrls(rows: LiveStreamRecord[]) {
   const traced = rows.find((row) => isTracedLiveTitle(row.title));
   if (traced) {
     if (traced.status !== "live") {
-      logLivePublicTrace(`resolveLiveWhepUrls skipped: status ${traced.status}`);
+      logLivePublicTrace(`observeCloudflareLiveInputs skipped: status ${traced.status}`);
     } else if (!isRealCloudflareLiveInputId(traced.cloudflare_live_input_id)) {
-      logLivePublicTrace("resolveLiveWhepUrls skipped: live input is not a real Cloudflare id");
+      logLivePublicTrace("observeCloudflareLiveInputs skipped: live input is not a real Cloudflare id");
     }
   }
   const liveRows = rows.filter(
@@ -182,31 +189,35 @@ async function resolveLiveWhepUrls(rows: LiveStreamRecord[]) {
   );
   for (const row of liveRows) {
     if (isTracedLiveTitle(row.title)) {
-      logLivePublicTrace("resolveLiveWhepUrls received traced stream: yes");
+      logLivePublicTrace("observeCloudflareLiveInputs received traced stream: yes");
     }
   }
   const ids = [...new Set(liveRows.map((row) => row.cloudflare_live_input_id!))];
   await Promise.all(
     ids.map(async (id) => {
-      const traced = liveRows.some((row) => row.cloudflare_live_input_id === id && isTracedLiveTitle(row.title));
+      const tracedRow = liveRows.some((row) => row.cloudflare_live_input_id === id && isTracedLiveTitle(row.title));
       try {
-        const url = await resolveCloudflareLiveWhepUrl(id);
-        if (traced) {
+        const input = await getCloudflareLiveInput(id);
+        const url = whepPlaybackUrlFromLiveInput(id, input);
+        ingestByInputId.set(id, input.ingest);
+        if (tracedRow) {
+          logLivePublicTrace(`Cloudflare ingest: ${input.ingest}`);
           logLivePublicTrace(`WHEP resolved: ${url ? "yes" : "no"}`);
         }
         if (url) {
-          urls.set(id, url);
+          whepByInputId.set(id, url);
         }
       } catch {
-        if (traced) {
+        ingestByInputId.set(id, "unknown");
+        if (tracedRow) {
           logLivePublicTrace("Cloudflare lookup: fail");
+          logLivePublicTrace("Cloudflare ingest: unknown");
           logLivePublicTrace("WHEP resolved: no");
         }
-        // Leave WHEP unset rather than substituting the Cloudflare iframe.
       }
     }),
   );
-  return urls;
+  return { whepByInputId, ingestByInputId };
 }
 
 const VIEWER_COUNT_TTL_MS = 45_000;
@@ -295,7 +306,9 @@ export async function supabaseListPublicLiveStreams(filter?: {
   const summaries = await hydrateLiveRows(rows);
   logLivePublicTrace(`hydrate test: ${summaries.some((item) => isTracedLiveTitle(item.title)) ? "yes" : "no"}`);
   await refreshLiveViewerCounts(rows, summaries);
-  return summaries.sort((a, b) => {
+  // Display filter only. Occupying DB rows (created|live) stay persisted for #4B.
+  const visible = summaries.filter((item) => item.status !== "live" || isPubliclyLive(item));
+  return visible.sort((a, b) => {
     if (a.status === "live" && b.status !== "live") {
       return -1;
     }
@@ -308,10 +321,11 @@ export async function supabaseListPublicLiveStreams(filter?: {
 
 export async function supabaseLiveLocationIds() {
   const streams = await supabaseListPublicLiveStreams();
-  return streams.filter((item) => item.status === "live").map((item) => item.location.id);
+  return streams.filter((item) => isPubliclyLive(item)).map((item) => item.location.id);
 }
 
 export async function supabaseGetLiveStreamPage(id: string, currentUserId?: string | null) {
+  // Owner/studio must still load DB-live rows even when ingest is disconnected.
   await supabaseSweepLiveStreams();
   const supabase = await createClient();
   const { data } = await supabase.from("live_streams").select("*").eq("id", id).maybeSingle();
@@ -341,6 +355,9 @@ export async function supabaseCreateLiveStream(input: {
   eventId?: string | null;
   requestId?: string | null;
 }) {
+  // P0 #4B (not this ticket): serialize create so a reporter has at most one
+  // occupying row (created|live). Connected existing → return that broadcast.
+  // DB-live + Cloudflare disconnected → reconcile, then allow create.
   const supabase = await createClient();
   const { data: reporter } = await supabase
     .from("profiles")

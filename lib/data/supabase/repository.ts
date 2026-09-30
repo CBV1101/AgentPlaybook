@@ -43,6 +43,7 @@ import { assembleYourWorldFeed, type YourWorldItem } from "@/lib/your-world";
 import { citySlug } from "@/lib/geo";
 import { assertEventAttachable } from "@/lib/events";
 import type { EventPageData, EventReporter, EventSummary } from "@/lib/types";
+import { isPubliclyLive } from "@/lib/live";
 import { createClient } from "@/lib/supabase/server";
 import { getDataSource } from "@/lib/data/mode";
 import {
@@ -970,7 +971,7 @@ async function supabaseAssembleProfile(profile: NonNullable<Awaited<ReturnType<t
   const investigations = await supabaseListPublicInvestigationsForReporter(profile.id);
   return assembleReporterProfilePage(profile, reports, locationsById, {
     ...extras,
-    liveNow: streams.filter((item) => item.status === "live"),
+    liveNow: streams.filter((item) => isPubliclyLive(item)),
     pastLive: streams.filter((item) => item.status === "ended"),
     investigations,
   });

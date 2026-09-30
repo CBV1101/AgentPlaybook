@@ -2,7 +2,7 @@ import { getFollowGraph, getFollowingFeed, listPublicLiveStreams } from "@/lib/d
 import type { DiscoveryPlace } from "@/lib/data/discovery";
 import { applyFollowingShowcase } from "@/lib/discovery-showcase";
 import { followGraphIsEmpty, liveMatchesFollows } from "@/lib/follows";
-import { isActiveLiveStatus, type LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 import type { CoverageRequest, FirsthandReport } from "@/lib/types";
 import type { YourWorldItem } from "@/lib/your-world";
 
@@ -34,7 +34,7 @@ export async function getFollowingPresentation(
   const [graph, lives] = await Promise.all([getFollowGraph(userId), listPublicLiveStreams()]);
   const hasFollows = !followGraphIsEmpty(graph);
   const followedLives = lives.filter(
-    (item) => isActiveLiveStatus(item.status) && liveMatchesFollows(item, graph),
+    (item) => isPubliclyLive(item) && liveMatchesFollows(item, graph),
   );
   const liveReportIds = followedLives.flatMap((item) => (item.reportId ? [item.reportId] : []));
   const world = await getFollowingFeed(userId, before, liveReportIds);

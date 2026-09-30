@@ -69,6 +69,7 @@ function stream(overrides: Partial<LiveStreamSummary>): LiveStreamSummary {
     sensitiveContent: false,
     recordingAssetId: null,
     viewerCount: null,
+    cloudflareIngest: "unknown",
     ...overrides,
   };
 }

@@ -4,9 +4,9 @@ import { readMockDatabase, updateMockDatabase } from "@/lib/data/mock/store";
 import { assertEventAttachable } from "@/lib/events";
 import {
   LIVE_CREATED_TIMEOUT_MS,
-  LIVE_HEARTBEAT_STALE_MS,
   MOCK_LIVE_SAMPLE_VIDEO,
   isPublicLiveStatus,
+  isPubliclyLive,
   type LiveStreamSummary,
 } from "@/lib/live";
 import { liveRecordingProvenanceFields } from "@/lib/media/provenance";
@@ -17,12 +17,6 @@ function mockSweepLiveStreams() {
   updateMockDatabase((current) => {
     current.live_streams ??= [];
     for (const row of current.live_streams) {
-      if (row.status === "live" && row.last_seen_at) {
-        if (now - new Date(row.last_seen_at).getTime() > LIVE_HEARTBEAT_STALE_MS) {
-          row.status = "failed";
-          row.ended_at = new Date().toISOString();
-        }
-      }
       if (row.status === "created") {
         if (now - new Date(row.created_at).getTime() > LIVE_CREATED_TIMEOUT_MS) {
           row.status = "failed";
@@ -116,7 +110,7 @@ export function mockListPublicLiveStreams(filter?: {
 export function mockLiveLocationIds() {
   mockSweepLiveStreams();
   return (readMockDatabase().live_streams ?? [])
-    .filter((item) => item.status === "live")
+    .filter((item) => isPubliclyLive(item))
     .map((item) => item.location_id);
 }
 
@@ -143,6 +137,7 @@ export async function mockCreateLiveStream(input: {
   eventId?: string | null;
   requestId?: string | null;
 }) {
+  // P0 #4B occupancy (created|live) is not enforced here. See supabaseCreateLiveStream.
   const locationId = input.locationId;
   const database = readMockDatabase();
   const reporter = database.profiles.find((item) => item.id === input.userId);

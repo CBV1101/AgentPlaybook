@@ -57,6 +57,7 @@ function stream(
     sensitiveContent: false,
     recordingAssetId: null,
     viewerCount: viewers,
+    cloudflareIngest: "unknown",
   };
 }
 

@@ -15,7 +15,7 @@ import {
 import type { CoverageOpportunity } from "@/lib/coverage-opportunity";
 import { cityHref, citySlug } from "@/lib/geo";
 import type { CoverageRequest, FirsthandReport, LocationSummary } from "@/lib/types";
-import { isActiveLiveStatus, type LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 import { assembleYourWorldFeed, type YourWorldItem } from "@/lib/your-world";
 import { showcaseInvestigationPage } from "@/lib/investigation-showcase";
 import { liveMatchesFollows, type FollowGraph } from "@/lib/follows";
@@ -154,7 +154,7 @@ export function applyWantedShowcase(
   if (!isHomepageShowcaseAllowed(env)) {
     return { ...input, opportunities: [] as CoverageOpportunity[], usingShowcase: false };
   }
-  const hasReal = input.requests.length > 0 || input.liveStreams.some((item) => item.status === "live");
+  const hasReal = input.requests.length > 0 || input.liveStreams.some((item) => isPubliclyLive(item));
   if (hasReal) {
     return { ...input, opportunities: [] as CoverageOpportunity[], usingShowcase: false };
   }
@@ -182,7 +182,7 @@ export function applyExploreShowcase(
     return { ...input, opportunities: [] as CoverageOpportunity[], usingShowcase: false };
   }
   const hasReal =
-    input.liveStreams.some((item) => item.status === "live") ||
+    input.liveStreams.some((item) => isPubliclyLive(item)) ||
     input.requests.length > 0 ||
     input.reports.length > 0;
   if (hasReal) {
@@ -271,7 +271,7 @@ export function applyFollowingShowcase(
   };
   const liveStreams = [...showcase.liveStreams, ...investigation.parts.flatMap((part) => (part.liveStream ? [part.liveStream] : []))]
     .filter((item, index, all) => all.findIndex((row) => row.id === item.id) === index)
-    .filter((item) => isActiveLiveStatus(item.status) && liveMatchesFollows(item, followGraph));
+    .filter((item) => isPubliclyLive(item) && liveMatchesFollows(item, followGraph));
   const liveReportIds = new Set(liveStreams.flatMap((item) => (item.reportId ? [item.reportId] : [])));
   const reporterReport: FirsthandReport = {
     ...(showcase.reports.find((item) => item.city === "New York") ?? showcase.reports[0]!),

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { LiveBadge, LocationLabel } from "@/components/ui/badge";
 import { SensitiveContentGate } from "@/components/sensitive-content-gate";
 import { LiveWhepVideo } from "@/components/live-whep-video";
-import { reporterProfileHref, withLivePreviewIframeParams, type LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, reporterProfileHref, withLivePreviewIframeParams, type LiveStreamSummary } from "@/lib/live";
 import { isCloudflareCustomerLiveIframeUrl } from "@/lib/live/customer-player";
 import {
   livePreviewAllowsAutoplay,
@@ -191,11 +191,11 @@ export function LivePreview({
         ) : (
           <div className="flex h-full items-center justify-center bg-black px-4">
             <span className="text-center text-sm text-surface/80">
-              {stream.status === "live" && selected === "fallback"
+              {isPubliclyLive(stream) && selected === "fallback"
                 ? process.env.NODE_ENV === "development"
                   ? "Live playback is unavailable. WHEP was not used with the Cloudflare iframe."
                   : "This live firsthand report cannot be played right now."
-                : stream.status === "live"
+                : isPubliclyLive(stream)
                   ? "Live firsthand report"
                   : "Firsthand report"}
             </span>
@@ -206,7 +206,7 @@ export function LivePreview({
             <span className="pointer-events-none absolute left-2 top-2">
               <LiveBadge />
             </span>
-            {stream.startedAt && stream.status === "live" ? (
+            {stream.startedAt && isPubliclyLive(stream) ? (
               <ElapsedOverlay startedAt={stream.startedAt} />
             ) : null}
             <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent px-2 pb-2 pt-8">
@@ -220,7 +220,7 @@ export function LivePreview({
           </>
         ) : isThumb ? null : (
           <>
-            {stream.status === "live" ? (
+            {isPubliclyLive(stream) ? (
               <span className="pointer-events-none absolute left-2 top-2">
                 <LiveBadge />
               </span>
@@ -231,7 +231,7 @@ export function LivePreview({
                 </span>
               </span>
             )}
-            {stream.startedAt && stream.status === "live" ? (
+            {stream.startedAt && isPubliclyLive(stream) ? (
               <ElapsedOverlay startedAt={stream.startedAt} />
             ) : null}
           </>

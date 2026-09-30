@@ -1,4 +1,4 @@
-import type { LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 
 export type LiveViewerSurface = "home" | "location" | "profile" | "full";
 export type LiveViewerRenderer = "whep" | "iframe" | "file" | "fallback";
@@ -12,13 +12,13 @@ export function liveViewerIframeAvailable(stream: LiveStreamSummary) {
 }
 
 export function liveViewerSelectedRenderer(stream: LiveStreamSummary): LiveViewerRenderer {
-  if (stream.status === "live" && stream.playbackKind === "iframe") {
+  if (isPubliclyLive(stream) && stream.playbackKind === "iframe") {
     return "fallback";
   }
-  if (liveViewerWhepAvailable(stream)) {
+  if (liveViewerWhepAvailable(stream) && isPubliclyLive(stream)) {
     return "whep";
   }
-  if (stream.status === "live" && stream.playbackKind === "whep") {
+  if (isPubliclyLive(stream) && stream.playbackKind === "whep") {
     return "fallback";
   }
   if (stream.playbackKind === "iframe" && stream.playbackUrl) {

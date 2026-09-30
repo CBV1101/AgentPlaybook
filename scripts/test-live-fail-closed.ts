@@ -85,6 +85,11 @@ async function run() {
   assert(!supabaseRepo.includes("mock:local"), "C: supabase live-repository must not return mock:local");
   assert(!supabaseRepo.includes("flower.mp4"), "G: supabase live-repository must not publish the MDN sample");
   assert(!supabaseRepo.includes("LIVE_HEARTBEAT_STALE_MS"), "public live GET must not fail on-air rows for a stale heartbeat");
+  const observeStart = supabaseRepo.indexOf("async function observeCloudflareLiveInputs");
+  const observeEnd = supabaseRepo.indexOf("const VIEWER_COUNT_TTL_MS");
+  assert(observeStart >= 0 && observeEnd > observeStart, "P0 #4A: ingest observation helper must exist");
+  const observeFn = supabaseRepo.slice(observeStart, observeEnd);
+  assert(!observeFn.includes(".update("), "P0 #4A: Cloudflare observation must not mutate live_streams");
 
   const unconfigured = {
     CLOUDFLARE_ACCOUNT_ID: "",

@@ -1,4 +1,4 @@
-import { isActiveLiveStatus, type LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 import type { BoundingBox, GeoScope } from "@/lib/location";
 import type { FirsthandReport } from "@/lib/types";
 
@@ -95,7 +95,7 @@ export function compareLiveStreamsByViewers(a: LiveStreamSummary, b: LiveStreamS
 }
 
 export function liveStreamMatchesPlace(stream: LiveStreamSummary, place: PlaceQuery) {
-  if (!isActiveLiveStatus(stream.status)) {
+  if (!isPubliclyLive(stream)) {
     return false;
   }
   const scope = place.scope ?? "city";

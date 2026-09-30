@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isPubliclyLive } from "@/lib/live";
 import type { AppUser } from "@/lib/auth-user";
 import { findMatchingLocation, nextLocationSlug, slugForLocation } from "@/lib/data/locations";
 import { toCoverageRequest, toLocationSummary, toReport } from "@/lib/data/mappers";
@@ -149,7 +150,7 @@ export async function mockGetHomeFeed(currentUserId?: string | null) {
     reports,
     places: mockDiscoveryPlaces(),
     activeEvents: mockListActiveEventSummaries(),
-    liveStreams: mockListPublicLiveStreams().filter((item) => item.status === "live"),
+    liveStreams: mockListPublicLiveStreams().filter((item) => isPubliclyLive(item)),
   };
 }
 
@@ -231,7 +232,7 @@ export async function mockGetCountryPage(slug: string, currentUserId?: string | 
     latestReports: reportsForLocations(database, locationIds).slice(0, 8),
     mostRequested: requestsForLocations(database, locationIds, currentUserId).slice(0, 8),
     activeEvents: mockListActiveEventSummaries(locationIds),
-    liveStreams: mockListPublicLiveStreams({ locationIds: [...locationIds] }).filter((item) => item.status === "live"),
+    liveStreams: mockListPublicLiveStreams({ locationIds: [...locationIds] }).filter((item) => isPubliclyLive(item)),
   };
 }
 
@@ -257,7 +258,7 @@ export async function mockGetCityPage(slug: string, currentUserId?: string | nul
     mostRequested: openRequests.slice(0, 8),
     openRequests,
     activeEvents: mockListActiveEventSummaries(locationIds),
-    liveStreams: mockListPublicLiveStreams({ locationIds: [...locationIds] }).filter((item) => item.status === "live"),
+    liveStreams: mockListPublicLiveStreams({ locationIds: [...locationIds] }).filter((item) => isPubliclyLive(item)),
   };
 }
 
@@ -352,7 +353,7 @@ export async function mockGetPlacePageData(slug: string, currentUserId?: string 
     reportCount: reports.length,
     openRequestCount: requests.filter((item) => item.status === "open").length,
     activeEvents: mockListActiveEventSummaries(new Set([location.id])),
-    liveStreams: mockListPublicLiveStreams({ locationIds: [location.id] }).filter((item) => item.status === "live"),
+    liveStreams: mockListPublicLiveStreams({ locationIds: [location.id] }).filter((item) => isPubliclyLive(item)),
   };
 }
 
@@ -379,7 +380,7 @@ export async function mockGetCoverageRequestPage(id: string, currentUserId?: str
     interestedUserIds: joined.request_interests.map((item) => item.user_id),
     currentUserId: currentUserId ?? null,
     event: mockLinkedEvent(joined.event_id),
-    liveStreams: mockListPublicLiveStreams({ requestId: id }).filter((item) => item.status === "live"),
+    liveStreams: mockListPublicLiveStreams({ requestId: id }).filter((item) => isPubliclyLive(item)),
   };
 }
 
@@ -621,7 +622,7 @@ async function buildMockReporterPage(
     supportCount,
     correctionCount,
     completedLicensingCount,
-    liveNow: streams.filter((item) => item.status === "live"),
+    liveNow: streams.filter((item) => isPubliclyLive(item)),
     pastLive: streams.filter((item) => item.status === "ended"),
     investigations,
   });
@@ -1252,7 +1253,7 @@ export async function mockGetEventPage(id: string, currentUserId?: string | null
     requests: requests.filter((item) => item.status === "open"),
     reporters,
     timeline,
-    liveStreams: mockListPublicLiveStreams({ eventId: id }).filter((item) => item.status === "live"),
+    liveStreams: mockListPublicLiveStreams({ eventId: id }).filter((item) => isPubliclyLive(item)),
   };
 }
 

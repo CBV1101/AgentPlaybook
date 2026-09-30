@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readMockDatabase, updateMockDatabase } from "@/lib/data/mock/store";
 import { toLocationSummary, toReport } from "@/lib/data/mappers";
 import { mockListPublicLiveStreams } from "@/lib/data/mock/live-repository";
+import { isPubliclyLive } from "@/lib/live";
 import type { InvestigationItemRecord, InvestigationRecord, InvestigationStatus } from "@/lib/database.types";
 import {
   assembleInvestigationPage,
@@ -76,7 +77,7 @@ function summaryFor(
   const streams = mockListPublicLiveStreams({ reporterId: row.reporter_id });
   const liveNow = items.some((item) => {
     const stream = streams.find((live) => live.id === item.live_stream_id || live.reportId === item.report_id);
-    return stream?.status === "live";
+    return stream ? isPubliclyLive(stream) : false;
   });
   const publicCount = items.filter((item) => {
     if (item.report_id) {

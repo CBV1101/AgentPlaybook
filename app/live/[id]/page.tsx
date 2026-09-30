@@ -10,7 +10,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getLiveStreamPage } from "@/lib/queries";
 import { formatWhen } from "@/lib/format";
 import { cityHref, countryHref } from "@/lib/geo";
-import { liveBroadcastHref } from "@/lib/live";
+import { isPubliclyLive, liveBroadcastHref } from "@/lib/live";
 import { currentUserIsAdmin } from "@/lib/require-admin";
 
 type LivePageProps = {
@@ -40,7 +40,7 @@ export default async function LivePage({ params, searchParams }: LivePageProps) 
   }
 
   const isOwner = user?.id === stream.reporterId;
-  const live = stream.status === "live";
+  const live = isPubliclyLive(stream);
   const terminated = stream.status === "terminated";
   const sensitive = stream.sensitiveContent;
 
@@ -61,6 +61,8 @@ export default async function LivePage({ params, searchParams }: LivePageProps) 
         <Notice tone="danger">
           This livestream was removed from public view. It is not a live broadcast.
         </Notice>
+      ) : stream.status === "live" ? (
+        <p className="mt-3 fh-meta">This broadcast is not currently on air.</p>
       ) : (
         <p className="mt-3 fh-meta">This live report has ended. The recording stays in the archive.</p>
       )}

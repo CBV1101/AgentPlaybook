@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { LiveWhepVideo } from "@/components/live-whep-video";
 import { Notice } from "@/components/ui/page";
-import type { LiveStreamSummary } from "@/lib/live";
+import { isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 import { liveViewerSelectedRenderer, logFirsthandViewer } from "@/lib/live/viewer-render";
 
 type LivePlayerProps = {
@@ -79,9 +79,9 @@ export function LivePlayer({ stream, allowAutoplay = true }: LivePlayerProps) {
         src={stream.playbackUrl}
         controls
         playsInline
-        autoPlay={allowAutoplay && stream.status === "live"}
-        muted={allowAutoplay && stream.status === "live"}
-        loop={allowAutoplay && stream.status === "live"}
+        autoPlay={allowAutoplay && isPubliclyLive(stream)}
+        muted={allowAutoplay && isPubliclyLive(stream)}
+        loop={allowAutoplay && isPubliclyLive(stream)}
         className="aspect-video w-full rounded-lg border border-line bg-black"
       />
     );
@@ -95,7 +95,7 @@ export function LivePlayer({ stream, allowAutoplay = true }: LivePlayerProps) {
     );
   }
 
-  if (stream.status === "live") {
+  if (isPubliclyLive(stream)) {
     return (
       <Notice>
         {process.env.NODE_ENV === "development"

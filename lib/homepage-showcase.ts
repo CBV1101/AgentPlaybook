@@ -20,7 +20,7 @@ import type { CityBrowse } from "@/lib/data/geography";
 import { assembleReporterProfilePage, type ReporterProfilePage } from "@/lib/data/reporter";
 import type { Profile } from "@/lib/database.types";
 import { cityHref, citySlug, countrySlug } from "@/lib/geo";
-import { MOCK_LIVE_SAMPLE_VIDEO, type LiveStreamSummary } from "@/lib/live";
+import { MOCK_LIVE_SAMPLE_VIDEO, isPubliclyLive, type LiveStreamSummary } from "@/lib/live";
 import { isTracedLiveTitle, logLivePublicTrace } from "@/lib/live/public-trace";
 import type { CoverageRequest, EventSummary, FirsthandReport, LocationSummary } from "@/lib/types";
 
@@ -47,7 +47,7 @@ export function isHomepageShowcaseAllowed(env: DataSourceEnv = process.env) {
 export const MIN_DEV_LIVE_GRID_STREAMS = 6;
 
 export function countLiveNow(streams: LiveStreamSummary[]) {
-  return streams.filter((item) => item.status === "live").length;
+  return streams.filter((item) => isPubliclyLive(item)).length;
 }
 
 export function homepageHasMeaningfulActivity(input: {
@@ -66,8 +66,8 @@ export function homepageHasMeaningfulActivity(input: {
 
 export function mergeHomepageLiveStreams(real: LiveStreamSummary[], showcase: LiveStreamSummary[]) {
   logLivePublicTrace(`pre-merge test: ${real.some((item) => isTracedLiveTitle(item.title)) ? "yes" : "no"}`);
-  const liveReal = real.filter((item) => item.status === "live");
-  const restReal = real.filter((item) => item.status !== "live");
+  const liveReal = real.filter((item) => isPubliclyLive(item));
+  const restReal = real.filter((item) => !isPubliclyLive(item));
   let merged: LiveStreamSummary[];
   if (liveReal.length === 0) {
     merged = showcase;
@@ -75,7 +75,7 @@ export function mergeHomepageLiveStreams(real: LiveStreamSummary[], showcase: Li
     merged = real;
   } else {
     const taken = new Set(liveReal.map((item) => item.id));
-    const filler = showcase.filter((item) => item.status === "live" && !taken.has(item.id));
+    const filler = showcase.filter((item) => isPubliclyLive(item) && !taken.has(item.id));
     const need = MIN_DEV_LIVE_GRID_STREAMS - liveReal.length;
     merged = [...liveReal, ...filler.slice(0, need), ...restReal];
   }
@@ -279,6 +279,7 @@ function live(
     sensitiveContent: false,
     recordingAssetId: null,
     viewerCount,
+    cloudflareIngest: "unknown",
   };
 }
 
@@ -367,7 +368,7 @@ export function applyHomepageLiveReporterShowcase(
     can_live_stream: true,
     topics: [],
   };
-  const liveNow = streams.filter((item) => item.status === "live");
+  const liveNow = streams.filter((item) => isPubliclyLive(item));
   if (real) {
     return {
       ...real,

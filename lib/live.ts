@@ -3,6 +3,8 @@ import type { LocationSummary } from "@/lib/types";
 
 export type { LiveStreamStatus };
 
+export type CloudflareIngestObservation = "connected" | "disconnected" | "unknown";
+
 export type LiveStreamSummary = {
   id: string;
   title: string;
@@ -24,6 +26,7 @@ export type LiveStreamSummary = {
   sensitiveContent: boolean;
   recordingAssetId: string | null;
   viewerCount: number | null;
+  cloudflareIngest: CloudflareIngestObservation;
 };
 
 export const LIVE_HEARTBEAT_STALE_MS = 75_000;
@@ -50,8 +53,30 @@ export function liveBroadcastHref(id: string) {
   return `/live/${id}/broadcast`;
 }
 
+/**
+ * Public LIVE catalog (P0 #4A). Cloudflare disconnected ingest is hidden.
+ * This does not change persisted status and does not free the reporter's
+ * one-active-broadcast slot (P0 #4B).
+ */
+export function isPubliclyLive(stream: {
+  status: LiveStreamStatus | string;
+  cloudflareIngest?: CloudflareIngestObservation;
+}) {
+  return stream.status === "live" && stream.cloudflareIngest !== "disconnected";
+}
+
+/** Persisted on-air row. Not public catalog truth and not occupancy. */
 export function isActiveLiveStatus(status: LiveStreamStatus | string) {
   return status === "live";
+}
+
+/**
+ * Reporter occupancy for P0 #4B: at most one of these per reporter.
+ * Historical ended / failed / terminated rows do not occupy the slot.
+ * Enforcement belongs on create (server-side), not on public GET.
+ */
+export function isOccupyingBroadcastSlot(status: LiveStreamStatus | string) {
+  return status === "created" || status === "live";
 }
 
 export function isPublicLiveStatus(status: LiveStreamStatus | string) {
